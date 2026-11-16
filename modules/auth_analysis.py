@@ -1,3 +1,4 @@
+import os
 import re
 
 import requests
@@ -5,6 +6,9 @@ from bs4 import BeautifulSoup
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+BUNDLED_USERNAMES = os.path.join(os.path.dirname(__file__), "..", "wordlists", "common_usernames.txt")
+BUNDLED_PASSWORDS = os.path.join(os.path.dirname(__file__), "..", "wordlists", "common_passwords.txt")
 
 LOGIN_PATH_HINTS = [
     "login", "signin", "sign-in", "admin", "administrator", "wp-login.php",
@@ -520,7 +524,44 @@ def assess_session_hijacking_risk(base_url, cookie_issues, report=None):
     return risk_factors
 
 
-def brute_force_http_form(login_url, userlist_path, passlist_path, max_attempts=2000, report=None):
+def _load_wordlist_or_default(path, default_path):
+    use_path = path if path else default_path
+    with open(use_path, "r", encoding="utf-8", errors="ignore") as fh:
+        return [l.strip() for l in fh if l.strip()]
+
+
+def discover_candidate_usernames(login_url):
+    usernames = set()
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(login_url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        base_url = None
+
+    if base_url:
+        try:
+            from modules import wordpress_enum
+            is_wp, _ = wordpress_enum.detect_wordpress(base_url)
+            if is_wp:
+                found = wordpress_enum.enumerate_users_rest(base_url)
+                if not found:
+                    found = wordpress_enum.enumerate_users_author_archive(base_url)
+                usernames.update(u for u in found if u)
+        except Exception:
+            pass
+
+    usernames.update(_load_wordlist_or_default(None, BUNDLED_USERNAMES))
+    return sorted(usernames)
+
+
+def _has_dynamic_token(form):
+    token_hints = ("csrf", "token", "nonce", "verification")
+    return any(hint in name.lower() for name in form["extra_fields"] for hint in token_hints)
+
+
+def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
+                           max_attempts=5000, report=None):
     resp = _get(login_url, allow_redirects=True)
     if not resp:
         return None
@@ -531,15 +572,28 @@ def brute_force_http_form(login_url, userlist_path, passlist_path, max_attempts=
                                 f"Could not identify a username/password form at {login_url}", "INFO")
         return None
 
-    with open(userlist_path, "r", encoding="utf-8", errors="ignore") as fh:
-        usernames = [l.strip() for l in fh if l.strip()]
-    with open(passlist_path, "r", encoding="utf-8", errors="ignore") as fh:
-        passwords = [l.strip() for l in fh if l.strip()]
+    if userlist_path:
+        usernames = _load_wordlist_or_default(userlist_path, None)
+        username_source = f"supplied list ({userlist_path})"
+    else:
+        usernames = discover_candidate_usernames(login_url)
+        username_source = "auto-discovered (WordPress user enum + bundled common-username list)"
+
+    passwords = _load_wordlist_or_default(passlist_path, BUNDLED_PASSWORDS)
+    password_source = passlist_path if passlist_path else "bundled common-password list"
+
+    if report:
+        report.add_finding("Authentication Testing",
+                            f"HTTP form brute force starting: {len(usernames)} username(s) x "
+                            f"{len(passwords)} password(s)",
+                            f"Usernames: {username_source} | Passwords: {password_source}",
+                            "INFO")
 
     baseline_len = len(resp.text or "")
     session = requests.Session()
     session.verify = False
     failure_indicators = ["invalid", "incorrect", "failed", "error", "denied", "try again"]
+    dynamic_token = _has_dynamic_token(form)
 
     attempts = 0
     for username in usernames:
@@ -547,6 +601,14 @@ def brute_force_http_form(login_url, userlist_path, passlist_path, max_attempts=
             attempts += 1
             if attempts > max_attempts:
                 break
+
+            if dynamic_token:
+                fresh_resp = _get(login_url, allow_redirects=True)
+                fresh_form = _extract_login_form(fresh_resp.text, login_url) if fresh_resp else None
+                if not fresh_form:
+                    continue
+                form = fresh_form
+
             payload = dict(form["extra_fields"])
             payload[form["user_field"]] = username
             payload[form["pass_field"]] = password

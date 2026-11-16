@@ -344,14 +344,12 @@ def auth_brute_force_http(state):
     if state.http_port and state.http_port not in (80, 443):
         base_url += f":{state.http_port}"
     login_url = prompt_path(f"Login page URL [{base_url}]") or base_url
-    userlist = prompt_path("Path to username wordlist")
-    passlist = prompt_path("Path to password wordlist")
-    if not userlist or not passlist:
-        print("[!] Both a username and password wordlist are required.")
-        pause()
-        return
+    userlist = prompt_path("Path to username wordlist (blank = auto-discover usernames)")
+    passlist = prompt_path("Path to password wordlist (blank = use bundled common passwords)")
 
     report = ReconReport(target=target)
+    if not userlist:
+        print("[*] No username list given - auto-discovering candidate usernames...")
     result = auth_analysis.brute_force_http_form(login_url, userlist, passlist, report=report)
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
