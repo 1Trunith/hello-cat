@@ -715,4 +715,3 @@ app.js
 main.py
 config.py
 settings.py
-
