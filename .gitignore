@@ -16,6 +16,7 @@ env/
 *.txt
 !requirements.txt
 !wordlists/*.txt
+scan_history/
 
 # OS / editor
 .DS_Store

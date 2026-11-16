@@ -1,9 +1,3 @@
-"""Technology fingerprinting module for Hello Cat.
-
-Inspects HTTP response headers and body for server software, frameworks,
-and CMS signatures.
-"""
-
 import re
 
 import requests

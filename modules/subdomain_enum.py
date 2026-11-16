@@ -1,9 +1,3 @@
-"""Subdomain discovery module for Hello Cat.
-
-Only runs when a --domain is supplied (an IP alone cannot be brute-forced
-for subdomains). Resolves candidate subdomains concurrently via DNS.
-"""
-
 import os
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed

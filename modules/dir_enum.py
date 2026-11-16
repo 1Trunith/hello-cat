@@ -1,9 +1,3 @@
-"""Directory/file brute-forcing module for Hello Cat.
-
-Threaded HTTP brute-force against a target using a bundled wordlist,
-a detected SecLists wordlist, or a user-supplied wordlist path.
-"""
-
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

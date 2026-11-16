@@ -1,16 +1,156 @@
-"""Vulnerability knowledge base for Hello Cat.
-
-Maps short vulnerability IDs (referenced by vuln_check.py, port_scanner.py,
-tech_fingerprint.py and dir_enum.py) to detailed, lab-oriented write-ups:
-what it is, why it exists, its impact, how to validate it, step-by-step
-reproduction, relevant tools/commands, and remediation.
-
-This is reference material for *authorized* lab environments (TryHackMe,
-CTF ranges, your own infrastructure) - reproduction steps are intended to
-be run only against targets you are permitted to test.
-"""
-
 VULN_DB = {
+    "wp_user_enum": {
+        "title": "WordPress Username Enumeration",
+        "cause": "The WordPress REST API (/wp-json/wp/v2/users) or the "
+                 "author archive redirect (/?author=1) discloses valid "
+                 "usernames without authentication.",
+        "impact": "Exposed usernames remove half of the credential pair "
+                   "needed for login brute-force/credential-stuffing attacks "
+                   "and can be cross-referenced with leaked password dumps.",
+        "validation": "Request the REST API users endpoint and the author "
+                       "archive redirects directly and confirm usernames "
+                       "are returned.",
+        "reproduction": [
+            "curl http://<target_ip>/wp-json/wp/v2/users",
+            "curl -I http://<target_ip>/?author=1   # Location header reveals username",
+            "wpscan --url http://<target_ip> --enumerate u",
+        ],
+        "tools": ["curl", "wpscan"],
+        "remediation": "Disable the users REST endpoint for unauthenticated "
+                        "requests, block author archive enumeration, and use "
+                        "non-guessable usernames separate from display names.",
+    },
+    "wp_outdated": {
+        "title": "Outdated WordPress Core Version",
+        "cause": "The site discloses its WordPress core version via the "
+                  "homepage meta generator tag or readme.html, and that "
+                  "version may be missing security patches.",
+        "impact": "Core vulnerabilities in older WordPress releases can "
+                   "range from information disclosure to full remote code "
+                   "execution depending on the specific CVE.",
+        "validation": "Confirm the disclosed version and cross-reference it "
+                       "against the WordPress core vulnerability changelog.",
+        "reproduction": [
+            "curl -s http://<target_ip>/ | grep -i generator",
+            "curl http://<target_ip>/readme.html | grep -i version",
+            "wpscan --url http://<target_ip> --enumerate vp,vt",
+        ],
+        "tools": ["curl", "wpscan"],
+        "remediation": "Update WordPress core to the latest version and "
+                        "remove or restrict access to readme.html.",
+    },
+    "wp_xmlrpc_enabled": {
+        "title": "WordPress xmlrpc.php Enabled",
+        "cause": "The legacy XML-RPC API remains enabled, which many "
+                 "WordPress installs no longer need once the REST API and "
+                 "modern clients are used.",
+        "impact": "xmlrpc.php can be abused for amplified brute-force login "
+                   "attempts via system.multicall (many credential guesses "
+                   "in a single request) and for pingback-based internal "
+                   "port scanning/SSRF.",
+        "validation": "Request the endpoint directly and confirm it "
+                       "responds to XML-RPC methods.",
+        "reproduction": [
+            "curl -i http://<target_ip>/xmlrpc.php",
+            "curl -d '<?xml version=\"1.0\"?><methodCall>"
+            "<methodName>system.listMethods</methodName></methodCall>' "
+            "http://<target_ip>/xmlrpc.php",
+        ],
+        "tools": ["curl", "wpscan --enumerate ap"],
+        "remediation": "Disable xmlrpc.php entirely if not required, or "
+                        "restrict/rate-limit access to it at the web server "
+                        "or WAF layer.",
+    },
+    "wp_config_backup": {
+        "title": "Exposed WordPress Configuration Backup",
+        "cause": "A backup or editor swap file of wp-config.php (e.g. "
+                  ".bak, .old, ~, .swp) was left in a web-accessible "
+                  "location.",
+        "impact": "CRITICAL - wp-config.php contains database credentials, "
+                   "authentication secret keys/salts, and the WordPress "
+                   "table prefix, enabling full database and session "
+                   "forgery access.",
+        "validation": "Download the file and confirm it contains "
+                       "DB_NAME/DB_USER/DB_PASSWORD definitions.",
+        "reproduction": [
+            "curl http://<target_ip>/wp-config.php.bak -o wp-config.php.bak",
+            "grep -i 'DB_PASSWORD\\|AUTH_KEY\\|SECURE_AUTH_KEY' wp-config.php.bak",
+        ],
+        "tools": ["curl", "grep"],
+        "remediation": "Remove backup/swap files from the webroot "
+                        "immediately, block access to dotfiles and common "
+                        "backup extensions at the web server level, and "
+                        "rotate the exposed database credentials and "
+                        "secret keys.",
+    },
+    "sql_injection_suspected": {
+        "title": "Suspected SQL Injection (Error-Based)",
+        "cause": "A single-quote character injected into a URL parameter "
+                  "produced a database error message in the response, "
+                  "indicating unsanitized input is reaching a SQL query.",
+        "impact": "SQL injection can allow authentication bypass, data "
+                   "exfiltration (including password hashes), and in some "
+                   "database configurations, file read/write or command "
+                   "execution.",
+        "validation": "Manually confirm by sending the payload with a "
+                       "proxy (Burp/ZAP) and comparing boolean-based "
+                       "true/false responses (e.g. ' OR '1'='1 vs "
+                       "' OR '1'='2) before concluding injection is real.",
+        "reproduction": [
+            "curl \"http://<target_ip>/?id=1'\"",
+            "curl \"http://<target_ip>/?id=1' OR '1'='1\"",
+            "sqlmap -u \"http://<target_ip>/?id=1\" --batch --dbs",
+        ],
+        "tools": ["curl", "Burp Suite Repeater", "sqlmap"],
+        "remediation": "Use parameterized queries/prepared statements for "
+                        "all database access, apply least-privilege database "
+                        "accounts, and enable a WAF as defense in depth.",
+    },
+    "weak_session_cookie": {
+        "title": "Session Cookie Missing Security Flags",
+        "cause": "A cookie used for session tracking was issued without "
+                  "one or more of the Secure, HttpOnly, or SameSite "
+                  "attributes.",
+        "impact": "Missing HttpOnly allows JavaScript (including injected "
+                   "XSS payloads) to read the cookie and exfiltrate the "
+                   "session. Missing Secure allows the cookie to be sent "
+                   "over plain HTTP, exposing it to network interception. "
+                   "Missing SameSite increases CSRF exposure.",
+        "validation": "Inspect the Set-Cookie header on the initial "
+                       "response and confirm which attributes are absent.",
+        "reproduction": [
+            "curl -i http://<target_ip>/ | grep -i set-cookie",
+            "Check for: Secure, HttpOnly, SameSite=Strict/Lax",
+        ],
+        "tools": ["curl", "Browser DevTools (Application/Storage tab)"],
+        "remediation": "Set Secure, HttpOnly, and an appropriate SameSite "
+                        "value on all session cookies at the application or "
+                        "framework configuration level.",
+    },
+    "default_creds_confirmed": {
+        "title": "Default or Weak Credentials Accepted",
+        "cause": "A login form accepted a common default or weak "
+                  "username/password pair that was never changed after "
+                  "installation.",
+        "impact": "CRITICAL - direct authenticated access to the "
+                   "application, often with administrative privileges, "
+                   "typically the fastest path to full compromise.",
+        "validation": "Log in manually through the browser with the same "
+                       "credentials to confirm the automated heuristic "
+                       "(response length/redirect change) was correct and "
+                       "not a false positive.",
+        "reproduction": [
+            "Open the login page in a browser",
+            "Enter the reported username/password pair",
+            "Confirm a successful authenticated session (dashboard/admin "
+            "panel access) rather than an error message",
+        ],
+        "tools": ["Browser", "Burp Suite"],
+        "remediation": "Change all default credentials immediately, enforce "
+                        "a strong password policy, add account lockout/rate "
+                        "limiting, and consider multi-factor authentication "
+                        "for administrative accounts.",
+    },
     "anon_ftp": {
         "title": "Anonymous FTP Login Allowed",
         "cause": "The FTP server is configured to accept the 'anonymous' "
@@ -470,5 +610,4 @@ VULN_DB = {
 
 
 def get_detail(vuln_id):
-    """Return the detailed write-up dict for a vuln_id, or None if unknown."""
     return VULN_DB.get(vuln_id)

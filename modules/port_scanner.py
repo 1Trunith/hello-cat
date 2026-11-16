@@ -1,11 +1,3 @@
-"""Port scanning and service detection module for Hello Cat.
-
-Uses nmap (via subprocess + XML output) when available on PATH for fast,
-accurate scanning with service/version detection. Falls back to a
-threaded pure-Python TCP connect scanner with basic banner grabbing
-when nmap is not installed.
-"""
-
 import shutil
 import socket
 import subprocess
@@ -33,7 +25,6 @@ def nmap_available():
 
 
 def run_nmap_scan(target, ports=DEFAULT_PORTS, timing="-T4"):
-    """Run nmap with service/version detection, return list of port dicts."""
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         xml_path = tmp.name
     try:
@@ -125,7 +116,6 @@ def _scan_single_port(target, port, timeout=1.0):
 
 
 def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
-    """Threaded pure-Python TCP connect scan with banner grabbing."""
     results = []
     port_list = _expand_ports(ports)
     with ThreadPoolExecutor(max_workers=threads) as executor:
@@ -141,7 +131,6 @@ def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
 
 
 def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
-    """Run the best available scan method and record findings in report."""
     use_nmap = nmap_available()
     if use_nmap:
         open_ports = run_nmap_scan(target, ports=ports)

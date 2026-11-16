@@ -1,10 +1,3 @@
-"""Common vulnerability checks module for Hello Cat.
-
-Lightweight, signature-based checks for well-known misconfigurations and
-CVEs that are frequently seen in TryHackMe / CTF-style boxes. These are
-intentionally non-destructive (no exploitation, just detection probes).
-"""
-
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 

@@ -1,28 +1,11 @@
 #!/usr/bin/env python3
-"""
-Hello Cat - Made By @.Trunith
-=====================================================
-
-For use against authorized lab targets only (TryHackMe, CTF ranges,
-your own infrastructure, or systems you have written permission to test).
-
-Usage:
-    python hello-cat.py <target_ip> [options]   # non-interactive
-    python hello-cat.py                         # interactive: prompts for a target
-"""
 
 import argparse
-import ipaddress
-import os
-import socket
 import sys
 
 from modules import banner, port_scanner, dir_enum, subdomain_enum, tech_fingerprint, vuln_check
+from modules import wordpress_enum, auth_analysis, dns_tls, history, netutils, menu
 from modules.report import ReconReport
-
-
-def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
 
 
 def parse_args():
@@ -31,61 +14,35 @@ def parse_args():
         description="Hello Cat - automated TryHackMe/CTF reconnaissance tool",
     )
     parser.add_argument("target", nargs="?", default=None,
-                         help="Target IP address (or hostname). Omit to be prompted interactively.")
-    parser.add_argument("--domain", help="Domain name to use for subdomain brute-forcing "
-                                          "(optional, required to enable that module)")
+                         help="Target IP address (or hostname). Omit to launch the interactive menu.")
+    parser.add_argument("--domain", help="Domain name to use for subdomain brute-forcing")
     parser.add_argument("--ports", default=port_scanner.DEFAULT_PORTS,
-                         help="Port range/list for scanning (default: common ports + top 1000)")
+                         help="Port range/list for scanning")
     parser.add_argument("--wordlist", help="Custom wordlist path for directory brute-forcing")
     parser.add_argument("--sub-wordlist", help="Custom wordlist path for subdomain brute-forcing")
     parser.add_argument("--threads", type=int, default=100, help="Thread count (default: 100)")
-    parser.add_argument("--scheme", choices=["http", "https"], default="http",
-                         help="HTTP scheme to use for web-based modules (default: http)")
-    parser.add_argument("--http-port", type=int, help="HTTP port if non-standard (default: 80/443)")
+    parser.add_argument("--scheme", choices=["http", "https"], default="http")
+    parser.add_argument("--http-port", type=int)
     parser.add_argument("--output", help="Save report to this base filename (adds .json/.txt)")
     parser.add_argument("--verbose", action="store_true",
-                         help="Print full vulnerability deep-dives (cause, impact, reproduction "
-                              "steps, remediation) in the console instead of just a summary")
-    parser.add_argument("--skip-ports", action="store_true", help="Skip port scanning")
-    parser.add_argument("--skip-dirs", action="store_true", help="Skip directory enumeration")
-    parser.add_argument("--skip-vulns", action="store_true", help="Skip vulnerability checks")
+                         help="Print full vulnerability deep-dives in the console")
+    parser.add_argument("--skip-ports", action="store_true")
+    parser.add_argument("--skip-dirs", action="store_true")
+    parser.add_argument("--skip-vulns", action="store_true")
+    parser.add_argument("--skip-authtest", action="store_true",
+                         help="Skip default credential testing in Web Application Analysis")
     return parser.parse_args()
 
 
-def resolve_target(target):
-    try:
-        ipaddress.ip_address(target)
-        return target
-    except ValueError:
-        try:
-            return socket.gethostbyname(target)
-        except socket.gaierror:
-            print(f"[!] Could not resolve target '{target}'. Exiting.")
-            sys.exit(1)
+def run_cli(args):
+    banner.print_banner()
 
-
-def prompt_for_target():
     try:
-        target = input("Enter target IP address (or hostname): ").strip()
-    except EOFError:
-        target = ""
-    if not target:
-        print("[!] No target entered. Exiting.")
+        target_ip = netutils.resolve_target(args.target)
+    except Exception:
+        print(f"[!] Could not resolve target '{args.target}'. Exiting.")
         sys.exit(1)
-    return target
 
-
-def main():
-    args = parse_args()
-
-    if args.target is None:
-        clear_screen()
-        banner.print_banner()
-        args.target = prompt_for_target()
-    else:
-        banner.print_banner()
-
-    target_ip = resolve_target(args.target)
     print(f"[*] Target resolved to: {target_ip}")
     if args.domain:
         print(f"[*] Domain supplied for subdomain enumeration: {args.domain}")
@@ -110,6 +67,8 @@ def main():
                     args.scheme = "https"
                 break
 
+    dns_tls.run(target_ip, open_ports, report=report)
+
     dir_hits, base_url = [], f"{args.scheme}://{target_ip}"
     if not args.skip_dirs:
         print(f"\n[*] Starting directory/file enumeration on {base_url}...")
@@ -125,20 +84,30 @@ def main():
         target_ip, scheme=args.scheme, port=http_port, report=report)
     print(f"[+] Fingerprinting complete: {len(technologies)} signature(s) found.")
 
-    print(f"\n[*] Running subdomain enumeration...")
+    print("\n[*] Running subdomain enumeration...")
     subdomains, _ = subdomain_enum.enumerate_subdomains(
         domain=args.domain, wordlist_path=args.sub_wordlist,
         threads=args.threads, report=report)
     print(f"[+] Subdomain enumeration complete: {len(subdomains)} subdomain(s) resolved.")
 
     if not args.skip_vulns:
-        print(f"\n[*] Running common vulnerability checks...")
+        print("\n[*] Running common vulnerability checks...")
         vuln_check.run_checks(target_ip, base_url, open_ports, dir_hits, report=report)
         print("[+] Vulnerability checks complete.")
     else:
         print("\n[*] Skipping vulnerability checks (--skip-vulns).")
 
+    print("\n[*] Checking for WordPress...")
+    wordpress_enum.enumerate(target_ip, scheme=args.scheme, port=http_port,
+                              threads=args.threads, report=report)
+
+    print("\n[*] Running web application analysis...")
+    auth_analysis.run_analysis(target_ip, scheme=args.scheme, port=http_port,
+                                dir_hits=dir_hits, report=report,
+                                skip_authtest=args.skip_authtest)
+
     report.print_console(verbose=args.verbose)
+    history.save_scan(report)
 
     if args.output:
         json_path = f"{args.output}.json"
@@ -146,6 +115,19 @@ def main():
         report.save_json(json_path)
         report.save_text(text_path)
         print(f"\n[+] Report saved to {json_path} and {text_path}")
+
+
+def run_interactive():
+    state = menu.SessionState()
+    menu.run_menu_loop(state)
+
+
+def main():
+    args = parse_args()
+    if args.target:
+        run_cli(args)
+    else:
+        run_interactive()
 
 
 if __name__ == "__main__":

@@ -1,12 +1,3 @@
-"""Reporting/output module for Hello Cat.
-
-Collects findings from all recon modules and renders them to the console
-with severity ratings, and optionally saves JSON and/or plain-text reports.
-Findings tagged with a vuln_id get their full deep-dive write-up (cause,
-impact, validation, reproduction steps, tools, remediation) pulled from
-modules/vuln_database.py and attached for reporting.
-"""
-
 import json
 from datetime import datetime, timezone
 
@@ -21,11 +12,11 @@ except ImportError:
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
 SEVERITY_COLORS = {
-    "CRITICAL": "\033[41m\033[97m",  # white on red
-    "HIGH": "\033[91m",              # red
-    "MEDIUM": "\033[93m",            # yellow
-    "LOW": "\033[94m",               # blue
-    "INFO": "\033[92m",              # green
+    "CRITICAL": "\033[41m\033[97m",
+    "HIGH": "\033[91m",
+    "MEDIUM": "\033[93m",
+    "LOW": "\033[94m",
+    "INFO": "\033[92m",
 }
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -67,7 +58,6 @@ class ReconReport:
         return finding
 
     def set_section(self, name, data):
-        """Store raw structured data for a module (ports, dirs, subdomains, etc.)."""
         self.sections[name] = data
 
     def _sorted_findings(self):
