@@ -4,6 +4,8 @@ import re
 import shutil
 import tempfile
 
+import requests
+
 ROCKYOU_CANDIDATES = [
     "/usr/share/wordlists/rockyou.txt",
     "/usr/share/wordlists/rockyou.txt.gz",
@@ -17,7 +19,13 @@ SECLISTS_USERNAME_CANDIDATES = [
     "/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt",
 ]
 
-_ROCKYOU_CACHE = os.path.join(tempfile.gettempdir(), "hello_cat_rockyou_cache.txt")
+ROCKYOU_DOWNLOAD_URL = "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt"
+USERNAMES_DOWNLOAD_URL = "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Usernames/top-usernames-shortlist.txt"
+
+_ROCKYOU_GZ_CACHE = os.path.join(tempfile.gettempdir(), "hello_cat_rockyou_cache.txt")
+_CACHE_DIR = os.path.join(os.path.expanduser("~"), ".hello_cat", "wordlists")
+_ROCKYOU_DOWNLOAD_CACHE = os.path.join(_CACHE_DIR, "rockyou.txt")
+_USERNAMES_DOWNLOAD_CACHE = os.path.join(_CACHE_DIR, "top-usernames-shortlist.txt")
 
 
 def _decompress_gz(gz_path, dest_path):
@@ -28,23 +36,80 @@ def _decompress_gz(gz_path, dest_path):
     return dest_path
 
 
-def resolve_password_source(custom_path=None):
+def download_rockyou(progress=True):
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+    partial_path = _ROCKYOU_DOWNLOAD_CACHE + ".part"
+    try:
+        with requests.get(ROCKYOU_DOWNLOAD_URL, stream=True, timeout=30) as resp:
+            resp.raise_for_status()
+            total = int(resp.headers.get("Content-Length", 0))
+            written = 0
+            last_reported_mb = -1
+            with open(partial_path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=1024 * 256):
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    written += len(chunk)
+                    if progress:
+                        written_mb = written // (1024 * 1024)
+                        if written_mb != last_reported_mb and written_mb % 5 == 0:
+                            last_reported_mb = written_mb
+                            total_mb = total // (1024 * 1024) if total else "?"
+                            print(f"[*] Downloading rockyou.txt: {written_mb}MB / {total_mb}MB")
+        os.replace(partial_path, _ROCKYOU_DOWNLOAD_CACHE)
+        return _ROCKYOU_DOWNLOAD_CACHE
+    except (requests.RequestException, OSError) as exc:
+        if progress:
+            print(f"[!] Failed to download rockyou.txt: {exc}")
+        try:
+            if os.path.isfile(partial_path):
+                os.unlink(partial_path)
+        except OSError:
+            pass
+        return None
+
+
+def resolve_password_source(custom_path=None, allow_download=True):
     if custom_path and os.path.isfile(custom_path):
         return custom_path
     for candidate in ROCKYOU_CANDIDATES:
         if candidate.endswith(".gz") and os.path.isfile(candidate):
-            return _decompress_gz(candidate, _ROCKYOU_CACHE)
+            return _decompress_gz(candidate, _ROCKYOU_GZ_CACHE)
         if os.path.isfile(candidate):
             return candidate
+    if os.path.isfile(_ROCKYOU_DOWNLOAD_CACHE):
+        return _ROCKYOU_DOWNLOAD_CACHE
+    if allow_download:
+        print("[*] rockyou.txt not found locally - downloading a cached copy (one-time, ~133MB)...")
+        return download_rockyou()
     return None
 
 
-def resolve_username_source(custom_path=None):
+def download_usernames(progress=True):
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+    try:
+        resp = requests.get(USERNAMES_DOWNLOAD_URL, timeout=15)
+        resp.raise_for_status()
+        with open(_USERNAMES_DOWNLOAD_CACHE, "w", encoding="utf-8") as fh:
+            fh.write(resp.text)
+        return _USERNAMES_DOWNLOAD_CACHE
+    except (requests.RequestException, OSError) as exc:
+        if progress:
+            print(f"[!] Failed to download username list: {exc}")
+        return None
+
+
+def resolve_username_source(custom_path=None, allow_download=True):
     if custom_path and os.path.isfile(custom_path):
         return custom_path
     for candidate in SECLISTS_USERNAME_CANDIDATES:
         if os.path.isfile(candidate):
             return candidate
+    if os.path.isfile(_USERNAMES_DOWNLOAD_CACHE):
+        return _USERNAMES_DOWNLOAD_CACHE
+    if allow_download:
+        return download_usernames()
     return None
 
 
