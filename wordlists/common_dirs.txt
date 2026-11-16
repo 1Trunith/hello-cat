@@ -1,4 +1,3 @@
-```text
 admin
 administrator
 admins
@@ -716,4 +715,3 @@ app.js
 main.py
 config.py
 settings.py
-```
