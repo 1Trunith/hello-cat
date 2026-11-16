@@ -1,4 +1,253 @@
 VULN_DB = {
+    "brute_force_success": {
+        "title": "Credentials Recovered via Brute Force / Dictionary Attack",
+        "cause": "A service accepted a username/password combination found "
+                 "by exhaustively trying entries from supplied wordlists, "
+                 "indicating a weak or default credential was in use.",
+        "impact": "CRITICAL - direct authenticated access to the service, "
+                   "often leading to full host or application compromise "
+                   "depending on the account's privileges.",
+        "validation": "Manually authenticate with the recovered credentials "
+                       "to confirm access and determine the account's "
+                       "privilege level.",
+        "reproduction": [
+            "Re-run the specific engine command that found the credential "
+            "(hydra/medusa/ncrack) to reproduce the result",
+            "Manually connect using the recovered username/password",
+        ],
+        "tools": ["hydra", "medusa", "ncrack"],
+        "remediation": "Enforce strong, unique passwords, add account "
+                        "lockout/rate limiting, and disable or rotate any "
+                        "default accounts.",
+    },
+    "no_rate_limiting": {
+        "title": "No Login Rate Limiting Detected",
+        "cause": "Repeated failed login attempts were processed with no "
+                  "measurable throttling or delay.",
+        "impact": "Without rate limiting, an attacker can attempt large "
+                   "numbers of credential guesses quickly, making brute "
+                   "force and credential-stuffing attacks far more "
+                   "practical.",
+        "validation": "Send a burst of failed login attempts and measure "
+                       "whether response time increases or requests begin "
+                       "being rejected.",
+        "reproduction": [
+            "hydra -l admin -P wrong_passwords.txt <target> http-post-form "
+            "\"/login:user=^USER^&pass=^PASS^:Invalid\" -t 1",
+            "Observe whether requests are throttled, CAPTCHA'd, or blocked",
+        ],
+        "tools": ["hydra", "Burp Suite Intruder"],
+        "remediation": "Implement progressive delays, IP/account-based rate "
+                        "limiting, and CAPTCHA after repeated failures.",
+    },
+    "no_account_lockout": {
+        "title": "No Account Lockout Policy Detected",
+        "cause": "Repeated failed authentication attempts against the same "
+                  "account did not trigger any lockout or additional "
+                  "verification requirement.",
+        "impact": "Allows unlimited password guessing against a specific "
+                   "known username, making brute force of that account's "
+                   "password practical.",
+        "validation": "Submit many incorrect passwords for the same "
+                       "username and check whether the account becomes "
+                       "temporarily locked or additional verification is "
+                       "required.",
+        "reproduction": [
+            "Repeatedly submit the login form for one username with "
+            "incorrect passwords",
+            "Check whether a correct password still works afterward, and "
+            "whether any lockout message appears",
+        ],
+        "tools": ["curl", "Burp Suite Intruder"],
+        "remediation": "Lock or delay accounts after a reasonable number of "
+                        "failed attempts, with a sane unlock mechanism "
+                        "(time-based or verified self-service).",
+    },
+    "csrf_missing": {
+        "title": "Missing CSRF Protection on Login Form",
+        "cause": "The login form does not include an anti-CSRF token field, "
+                  "so the server cannot distinguish a legitimate submission "
+                  "from one triggered by a third-party site.",
+        "impact": "Primarily relevant to state-changing authenticated "
+                   "actions; on a login form itself, missing CSRF protection "
+                   "can enable login CSRF, where a victim is logged into an "
+                   "attacker-controlled account without realizing it.",
+        "validation": "Inspect the form's hidden inputs for a token field; "
+                       "confirm the server does not validate a token on "
+                       "submission.",
+        "reproduction": [
+            "View page source of the login form and check for hidden "
+            "csrf/_token/authenticity_token fields",
+            "Submit the form from a separate origin/test page without the "
+            "token and see if it is still accepted",
+        ],
+        "tools": ["Browser DevTools", "Burp Suite"],
+        "remediation": "Add a per-session anti-CSRF token to all forms, "
+                        "including login, and validate it server-side.",
+    },
+    "captcha_absent": {
+        "title": "No CAPTCHA / Automated-Abuse Protection on Login",
+        "cause": "The login form has no CAPTCHA or equivalent challenge to "
+                  "distinguish human submissions from automated ones.",
+        "impact": "Makes automated credential stuffing and brute-force "
+                   "attempts easier to run at scale without being blocked "
+                   "by bot-detection.",
+        "validation": "Inspect the login page source for CAPTCHA widget "
+                       "script/markup (reCAPTCHA, hCaptcha, Turnstile, "
+                       "etc.).",
+        "reproduction": [
+            "View page source and search for recaptcha/hcaptcha/turnstile",
+            "Attempt several rapid automated login submissions and observe "
+            "whether a challenge appears",
+        ],
+        "tools": ["Browser DevTools", "curl"],
+        "remediation": "Add a CAPTCHA or equivalent challenge after a small "
+                        "number of failed attempts, combined with rate "
+                        "limiting.",
+    },
+    "jwt_alg_none": {
+        "title": "JWT Accepts 'none' Algorithm",
+        "cause": "The application's JWT handling does not reject tokens "
+                  "whose header declares alg=none, which specifies no "
+                  "signature at all.",
+        "impact": "CRITICAL - an attacker can craft a token with arbitrary "
+                   "claims (e.g. an admin role) and no signature, and if the "
+                   "server accepts it, achieve full authentication bypass.",
+        "validation": "Modify a captured token's header to alg=none, strip "
+                       "the signature, and submit it to confirm whether the "
+                       "server accepts it.",
+        "reproduction": [
+            "jwt_tool <token> -X a   # alg=none attack mode",
+            "Resubmit the modified token to an authenticated endpoint and "
+            "check if it is accepted",
+        ],
+        "tools": ["jwt_tool", "Burp Suite JWT extension"],
+        "remediation": "Explicitly reject alg=none and pin the expected "
+                        "signing algorithm server-side rather than trusting "
+                        "the token header.",
+    },
+    "jwt_weak_secret_suspected": {
+        "title": "JWT Uses Symmetric Signing (Potential Weak Secret)",
+        "cause": "The token uses an HMAC-based algorithm (HS256/384/512), "
+                  "where the same secret is used to sign and verify; if that "
+                  "secret is weak or guessable, tokens can be forged.",
+        "impact": "If the signing secret is recovered, an attacker can "
+                   "forge arbitrary tokens with any claims, leading to "
+                   "authentication bypass or privilege escalation.",
+        "validation": "Attempt offline cracking of the secret against a "
+                       "wordlist using the token's own signature.",
+        "reproduction": [
+            "hashcat -m 16500 jwt.txt wordlist.txt",
+            "(or) jwt_tool <token> -C -d wordlist.txt",
+        ],
+        "tools": ["hashcat", "jwt_tool"],
+        "remediation": "Use a long, random, high-entropy signing secret (or "
+                        "switch to asymmetric signing such as RS256), and "
+                        "rotate it periodically.",
+    },
+    "ntlm_info_disclosure": {
+        "title": "NTLM Authentication Discloses Internal Hostname/Domain",
+        "cause": "The NTLM Type 2 (challenge) message returned by the "
+                  "server includes the internal NetBIOS/domain name by "
+                  "design of the protocol.",
+        "impact": "LOW - minor internal network information disclosure "
+                   "(hostnames/domain names) that can assist further "
+                   "reconnaissance or social engineering.",
+        "validation": "Send an NTLM Type 1 (negotiate) request and decode "
+                       "the Type 2 response's target name field.",
+        "reproduction": [
+            "curl -I --ntlm -u x:x http://<target_ip>/",
+            "(or) nmap --script http-ntlm-info -p 80,443 <target_ip>",
+        ],
+        "tools": ["curl", "nmap"],
+        "remediation": "This is inherent to the NTLM protocol; mitigate by "
+                        "restricting NTLM to internal networks and "
+                        "preferring Kerberos where possible.",
+    },
+    "user_enum_login_response": {
+        "title": "Username Enumeration via Login Error Response",
+        "cause": "The login endpoint returns a different response (length, "
+                  "message, or timing) depending on whether the submitted "
+                  "username exists, independent of the password.",
+        "impact": "Allows an attacker to build a list of valid usernames "
+                   "without any valid credentials, narrowing subsequent "
+                   "brute-force or credential-stuffing attempts.",
+        "validation": "Compare responses for a known-existing username vs. "
+                       "a clearly bogus one, both with the same wrong "
+                       "password.",
+        "reproduction": [
+            "curl -d 'user=admin&pass=wrong' <login_url>",
+            "curl -d 'user=zzz-bogus-999&pass=wrong' <login_url>",
+            "Diff the two responses (length, wording, timing)",
+        ],
+        "tools": ["curl", "Burp Suite Comparer"],
+        "remediation": "Return an identical generic error message and "
+                        "response time regardless of whether the username "
+                        "exists.",
+    },
+    "user_enum_password_reset": {
+        "title": "Username/Email Enumeration via Password Reset",
+        "cause": "The password reset flow returns different responses for "
+                  "a registered vs. unregistered email/username.",
+        "impact": "Allows an attacker to confirm which email addresses or "
+                   "usernames have accounts on the system, aiding targeted "
+                   "credential attacks or phishing.",
+        "validation": "Submit the reset form with a plausible existing "
+                       "identifier and a clearly bogus one, and compare "
+                       "responses.",
+        "reproduction": [
+            "curl -d 'email=admin@example.com' <reset_url>",
+            "curl -d 'email=nonexistent-xyz@example.com' <reset_url>",
+            "Diff the two responses",
+        ],
+        "tools": ["curl", "Burp Suite Comparer"],
+        "remediation": "Return the same generic 'if an account exists, an "
+                        "email has been sent' message regardless of whether "
+                        "the identifier is registered.",
+    },
+    "session_fixation": {
+        "title": "Session Identifier Does Not Rotate",
+        "cause": "The same session cookie value observed before "
+                  "authentication was still present afterward (or across "
+                  "repeated requests), suggesting the server does not issue "
+                  "a fresh session ID at login.",
+        "impact": "If confirmed post-login, an attacker who can set a "
+                   "victim's pre-auth session ID (session fixation) could "
+                   "hijack the authenticated session once the victim logs "
+                   "in.",
+        "validation": "Record the session cookie before login, complete a "
+                       "real login, and confirm whether the cookie value "
+                       "changes.",
+        "reproduction": [
+            "Note the session cookie value from an unauthenticated request",
+            "Log in through the browser",
+            "Check whether the session cookie value changed after login",
+        ],
+        "tools": ["Browser DevTools", "Burp Suite"],
+        "remediation": "Issue a new session identifier immediately after "
+                        "successful authentication and invalidate the "
+                        "pre-login session.",
+    },
+    "api_no_auth": {
+        "title": "API Endpoint Accessible Without Authentication",
+        "cause": "An API endpoint that would typically require "
+                  "authentication (user/account/admin data) returned data "
+                  "with no Authorization header or session cookie present.",
+        "impact": "HIGH - unauthenticated access to user or administrative "
+                   "data, potentially exposing personal information or "
+                   "enabling further attacks.",
+        "validation": "Request the endpoint directly with no credentials "
+                       "and confirm a 200 response with meaningful data.",
+        "reproduction": [
+            "curl -i http://<target_ip>/<endpoint>",
+            "Confirm the response contains real data rather than an auth "
+            "error or empty placeholder",
+        ],
+        "tools": ["curl", "Postman"],
+        "remediation": "Require valid authentication on all endpoints that "
+                        "expose user or administrative data, and apply "
+                        "authorization checks per resource.",
+    },
     "wp_user_enum": {
         "title": "WordPress Username Enumeration",
         "cause": "The WordPress REST API (/wp-json/wp/v2/users) or the "

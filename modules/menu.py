@@ -4,6 +4,7 @@ import sys
 from modules import (
     banner, port_scanner, dir_enum, subdomain_enum, tech_fingerprint,
     vuln_check, wordpress_enum, auth_analysis, dns_tls, history, netutils,
+    bruteforce, hash_tools, wordlist_tools, token_analysis, log_analysis,
 )
 from modules.report import ReconReport
 from modules.main_utils import clear_screen
@@ -28,11 +29,35 @@ MENU_TEXT = """{bold}{cyan}       MADE BY @.TRUNITH{reset}
   {green}[5]{reset} DNS & Hostname Discovery
   {green}[6]{reset} View Previous Scan Results
   {green}[7]{reset} Change Target IP / Domain
+  {green}[8]{reset} Authentication & Credential Testing
   {yellow}[0]{reset} Clear Terminal
   {yellow}[99]{reset} Exit
 
   ============================
 """
+
+AUTH_MENU_TEXT = """{bold}{cyan}  AUTHENTICATION & CREDENTIAL TESTING{reset}
+  ============================
+
+  {green}[1]{reset} Brute Force a Service (SSH/FTP/SMB/RDP)
+  {green}[2]{reset} Brute Force HTTP Login Form
+  {green}[3]{reset} Password Spray
+  {green}[4]{reset} Default Credential Check
+  {green}[5]{reset} Validate a Single Credential Pair
+  {green}[6]{reset} Hash Identifier / Cracker
+  {green}[7]{reset} Wordlist & Username Tools
+  {green}[8]{reset} Token Analyzer (JWT / NTLM / OAuth / SAML)
+  {green}[9]{reset} Authentication Log Analyzer
+  {yellow}[0]{reset} Back to Main Menu
+
+  ============================
+"""
+
+AUTHORIZATION_WARNING = (
+    "This performs live authentication attempts against the target. "
+    "Only proceed if you are authorized to test it (TryHackMe lab, your "
+    "own system, or a signed engagement)."
+)
 
 
 class SessionState:
@@ -255,6 +280,308 @@ def view_previous_scans(state):
     pause()
 
 
+def confirm_authorized(action_description):
+    print(f"\n[!] {action_description}")
+    print(f"    {AUTHORIZATION_WARNING}")
+    try:
+        answer = input("    Type YES to continue: ").strip()
+    except EOFError:
+        answer = ""
+    return answer == "YES"
+
+
+def prompt_path(label):
+    try:
+        path = input(f"{label}: ").strip()
+    except EOFError:
+        path = ""
+    return path or None
+
+
+def auth_brute_force(state):
+    if not confirm_authorized("Live brute force against a network service."):
+        pause()
+        return
+    target = prompt_target(state)
+    if not target:
+        return
+    state.target = target
+    service = prompt_path("Service (ssh/ftp/smb/rdp)")
+    if not service:
+        return
+    port = prompt_path("Port (blank for default)")
+    userlist = prompt_path("Path to username wordlist (blank to use a single username)")
+    username = None if userlist else prompt_path("Username")
+    passlist = prompt_path("Path to password wordlist (blank to use a single password)")
+    password = None if passlist else prompt_path("Password")
+
+    report = ReconReport(target=target)
+    try:
+        result = bruteforce.brute_force(service, target, port=int(port) if port else None,
+                                         userlist=userlist, username=username,
+                                         passlist=passlist, password=password, report=report)
+    except ValueError as exc:
+        print(f"[!] {exc}")
+        pause()
+        return
+
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    if result:
+        print(f"\n[+] Found: {result['username']}:{result['password']}")
+    pause()
+
+
+def auth_brute_force_http(state):
+    if not confirm_authorized("Live brute force against an HTTP login form."):
+        pause()
+        return
+    target = prompt_target(state)
+    if not target:
+        return
+    state.target = target
+    base_url = f"{state.scheme}://{target}"
+    if state.http_port and state.http_port not in (80, 443):
+        base_url += f":{state.http_port}"
+    login_url = prompt_path(f"Login page URL [{base_url}]") or base_url
+    userlist = prompt_path("Path to username wordlist")
+    passlist = prompt_path("Path to password wordlist")
+    if not userlist or not passlist:
+        print("[!] Both a username and password wordlist are required.")
+        pause()
+        return
+
+    report = ReconReport(target=target)
+    result = auth_analysis.brute_force_http_form(login_url, userlist, passlist, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    if result:
+        print(f"\n[+] Found: {result['username']}:{result['password']}")
+    pause()
+
+
+def auth_password_spray(state):
+    if not confirm_authorized("Live password spray against a network service."):
+        pause()
+        return
+    target = prompt_target(state)
+    if not target:
+        return
+    state.target = target
+    service = prompt_path("Service (ssh/ftp/smb/rdp)")
+    userlist = prompt_path("Path to username wordlist")
+    password = prompt_path("Single password to spray")
+    if not service or not userlist or not password:
+        print("[!] Service, username wordlist, and password are all required.")
+        pause()
+        return
+
+    report = ReconReport(target=target)
+    result = bruteforce.password_spray(service, target, userlist, password, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    if result:
+        print(f"\n[+] Found: {result['username']}:{result['password']}")
+    pause()
+
+
+def auth_default_creds(state):
+    if not confirm_authorized("Live default-credential check against a network service."):
+        pause()
+        return
+    target = prompt_target(state)
+    if not target:
+        return
+    state.target = target
+    service = prompt_path("Service (ssh/ftp/smb/rdp)")
+    if not service:
+        return
+
+    report = ReconReport(target=target)
+    result = bruteforce.check_default_service_credentials(service, target, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    if result:
+        print(f"\n[+] Found: {result['username']}:{result['password']}")
+    pause()
+
+
+def auth_validate_single(state):
+    target = prompt_target(state)
+    if not target:
+        return
+    state.target = target
+    base_url = f"{state.scheme}://{target}"
+    if state.http_port and state.http_port not in (80, 443):
+        base_url += f":{state.http_port}"
+    login_url = prompt_path(f"Login page URL [{base_url}]") or base_url
+    username = prompt_path("Username")
+    password = prompt_path("Password") or ""
+
+    report = ReconReport(target=target)
+    result = auth_analysis.validate_credentials(login_url, username, password, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    print(f"\n[{'+' if result else '-'}] Credential check: {'succeeded' if result else 'failed/unclear'}")
+    pause()
+
+
+def auth_hash_tools(state):
+    value = prompt_path("Enter a hash value")
+    if not value:
+        return
+    matches = hash_tools.identify_hash(value)
+    if not matches:
+        print("[!] Hash type could not be identified.")
+        pause()
+        return
+    print("\nPossible hash types:")
+    for m in matches:
+        print(f"  - {m['type']}" + (f" (hashcat mode {m['hashcat_mode']})" if m["hashcat_mode"] is not None else ""))
+
+    try:
+        crack_it = input("\nAttempt to crack it with a wordlist? (y/N): ").strip().lower()
+    except EOFError:
+        crack_it = "n"
+    if crack_it == "y":
+        wordlist = prompt_path("Path to wordlist")
+        if wordlist:
+            report = ReconReport(target=state.target or "hash-analysis")
+            hash_tools.crack_hash(value, wordlist, report=report)
+            report.print_console(verbose=state.verbose)
+            history.save_scan(report)
+    pause()
+
+
+def auth_wordlist_tools(state):
+    print(AUTH_MENU_TEXT.format(bold=_BOLD, cyan=_CYAN, green=_GREEN, yellow=_YELLOW, reset=_RESET))
+    print("  [a] Merge/dedupe wordlists")
+    print("  [b] Generate password variants from base words")
+    print("  [c] Generate username variations from a name")
+    print("  [d] Extract credentials from a text/log file")
+    try:
+        choice = input("\nEnter option: ").strip().lower()
+    except EOFError:
+        choice = ""
+
+    if choice == "a":
+        paths_raw = prompt_path("Comma-separated wordlist paths to merge")
+        if not paths_raw:
+            return
+        paths = [p.strip() for p in paths_raw.split(",") if p.strip()]
+        merged = wordlist_tools.merge_lists(paths)
+        out_path = prompt_path("Output path for merged list")
+        if out_path:
+            wordlist_tools.save_list(merged, out_path)
+            print(f"[+] Wrote {len(merged)} unique entries to {out_path}")
+    elif choice == "b":
+        words_raw = prompt_path("Comma-separated base words")
+        if not words_raw:
+            return
+        words = [w.strip() for w in words_raw.split(",") if w.strip()]
+        variants = wordlist_tools.generate_password_variants(words)
+        out_path = prompt_path("Output path for generated wordlist")
+        if out_path:
+            wordlist_tools.save_list(variants, out_path)
+            print(f"[+] Wrote {len(variants)} variants to {out_path}")
+    elif choice == "c":
+        first = prompt_path("First name")
+        last = prompt_path("Last name")
+        if first and last:
+            usernames = wordlist_tools.generate_usernames(first, last)
+            print("\n".join(usernames))
+            out_path = prompt_path("Output path (blank to skip saving)")
+            if out_path:
+                wordlist_tools.save_list(usernames, out_path)
+    elif choice == "d":
+        file_path = prompt_path("Path to text/log file")
+        if file_path:
+            creds = wordlist_tools.extract_credentials_from_file(file_path)
+            print(f"\n[+] Found {len(creds)} candidate credential(s):")
+            for c in creds[:50]:
+                print(f"  {c['username']}:{c['password']}")
+    pause()
+
+
+def auth_token_analyzer(state):
+    print(AUTH_MENU_TEXT.format(bold=_BOLD, cyan=_CYAN, green=_GREEN, yellow=_YELLOW, reset=_RESET))
+    print("  [a] Decode/analyze a JWT")
+    print("  [b] Check for OAuth/SAML endpoints")
+    print("  [c] Check for NTLM authentication")
+    try:
+        choice = input("\nEnter option: ").strip().lower()
+    except EOFError:
+        choice = ""
+
+    report = ReconReport(target=state.target or "token-analysis")
+    if choice == "a":
+        token = prompt_path("Paste the JWT")
+        if token:
+            token_analysis.analyze_jwt(token, report=report)
+    elif choice == "b":
+        target = prompt_target(state)
+        if target:
+            base_url = f"{state.scheme}://{target}"
+            token_analysis.check_oauth_saml(base_url, report=report)
+    elif choice == "c":
+        target = prompt_target(state)
+        if target:
+            base_url = f"{state.scheme}://{target}"
+            token_analysis.check_ntlm_auth(base_url, report=report)
+
+    report.print_console(verbose=state.verbose)
+    if report.findings:
+        history.save_scan(report)
+    pause()
+
+
+def auth_log_analyzer(state):
+    file_path = prompt_path("Path to authentication log file")
+    if not file_path:
+        return
+    report = ReconReport(target=state.target or "log-analysis")
+    log_analysis.analyze_log(file_path, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    pause()
+
+
+AUTH_HANDLERS = {
+    "1": auth_brute_force,
+    "2": auth_brute_force_http,
+    "3": auth_password_spray,
+    "4": auth_default_creds,
+    "5": auth_validate_single,
+    "6": auth_hash_tools,
+    "7": auth_wordlist_tools,
+    "8": auth_token_analyzer,
+    "9": auth_log_analyzer,
+}
+
+
+def run_auth_menu(state):
+    while True:
+        clear_screen()
+        banner.print_banner()
+        print(AUTH_MENU_TEXT.format(bold=_BOLD, cyan=_CYAN, green=_GREEN, yellow=_YELLOW, reset=_RESET))
+        if state.target:
+            print(f"  Current target: {state.target}\n")
+        try:
+            choice = input("  Enter Option: ").strip()
+        except EOFError:
+            choice = "0"
+
+        if choice == "0":
+            return
+
+        handler = AUTH_HANDLERS.get(choice)
+        if handler:
+            handler(state)
+        else:
+            print("[!] Invalid option.")
+            pause()
+
+
 def change_target(state):
     try:
         new_target = input("Enter new target IP or hostname: ").strip()
@@ -285,6 +612,7 @@ HANDLERS = {
     "5": run_dns_discovery,
     "6": view_previous_scans,
     "7": change_target,
+    "8": run_auth_menu,
 }
 
 
