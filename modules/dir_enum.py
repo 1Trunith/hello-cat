@@ -25,18 +25,18 @@ SECLISTS_CANDIDATES = [
 INTERESTING_STATUS = {200, 204, 301, 302, 307, 401, 403}
 
 SENSITIVE_HITS = {
-    ".git/config": ("HIGH", "Exposed .git directory - source code may be recoverable"),
-    ".env": ("CRITICAL", "Exposed .env file - may contain credentials/secrets"),
-    ".svn": ("MEDIUM", "Exposed .svn directory"),
-    "phpinfo.php": ("MEDIUM", "phpinfo() exposed - leaks server configuration"),
-    "wp-login.php": ("INFO", "WordPress login page found"),
-    ".htpasswd": ("HIGH", "Exposed .htpasswd file"),
-    "id_rsa": ("CRITICAL", "Possible exposed private SSH key"),
-    "backup.sql": ("HIGH", "Possible exposed database backup"),
-    "db_backup.sql": ("HIGH", "Possible exposed database backup"),
-    "web.config": ("MEDIUM", "Exposed IIS web.config file"),
-    "server-status": ("MEDIUM", "Apache server-status page exposed"),
-    "actuator/health": ("MEDIUM", "Spring Boot actuator health endpoint exposed"),
+    ".git/config": ("HIGH", "Exposed .git directory - source code may be recoverable", "exposed_git"),
+    ".env": ("CRITICAL", "Exposed .env file - may contain credentials/secrets", "exposed_env"),
+    ".svn": ("MEDIUM", "Exposed .svn directory", None),
+    "phpinfo.php": ("MEDIUM", "phpinfo() exposed - leaks server configuration", "phpinfo_exposed"),
+    "wp-login.php": ("INFO", "WordPress login page found", None),
+    ".htpasswd": ("HIGH", "Exposed .htpasswd file", "exposed_htpasswd"),
+    "id_rsa": ("CRITICAL", "Possible exposed private SSH key", "exposed_private_key"),
+    "backup.sql": ("HIGH", "Possible exposed database backup", "exposed_backup_sql"),
+    "db_backup.sql": ("HIGH", "Possible exposed database backup", "exposed_backup_sql"),
+    "web.config": ("MEDIUM", "Exposed IIS web.config file", None),
+    "server-status": ("MEDIUM", "Apache server-status page exposed", "server_status_exposed"),
+    "actuator/health": ("MEDIUM", "Spring Boot actuator health endpoint exposed", "actuator_health_exposed"),
 }
 
 
@@ -99,13 +99,13 @@ def enumerate_dirs(target, scheme="http", port=None, wordlist_path=None,
             report.add_finding("Directory Enumeration", "No interesting paths found",
                                 f"wordlist: {wordlist_file}", "INFO")
         for hit in hits:
-            severity, note = "INFO", ""
-            for sig, (sev, desc) in SENSITIVE_HITS.items():
+            severity, note, vuln_id = "INFO", "", None
+            for sig, (sev, desc, vid) in SENSITIVE_HITS.items():
                 if sig in hit["path"]:
-                    severity, note = sev, f" | {desc}"
+                    severity, note, vuln_id = sev, f" | {desc}", vid
                     break
             detail = f"{hit['url']} -> HTTP {hit['status']} ({hit['length']} bytes){note}"
             report.add_finding("Directory Enumeration", f"Found: /{hit['path']}",
-                                detail, severity)
+                                detail, severity, vuln_id=vuln_id)
 
     return hits, base_url

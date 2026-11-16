@@ -27,14 +27,14 @@ BODY_SIGNATURES = {
 }
 
 OUTDATED_HINTS = {
-    "apache/2.2": ("MEDIUM", "Apache 2.2.x is end-of-life; check for known CVEs"),
-    "apache/2.4.7": ("MEDIUM", "Apache 2.4.7 has known vulnerabilities"),
-    "nginx/1.1": ("MEDIUM", "Old nginx version; check for known CVEs"),
-    "php/5": ("HIGH", "PHP 5.x is end-of-life and unsupported"),
-    "php/7.0": ("MEDIUM", "PHP 7.0 is end-of-life"),
-    "microsoft-iis/6.0": ("HIGH", "IIS 6.0 is very old and vulnerable to multiple CVEs"),
-    "openssl/0.9": ("CRITICAL", "Ancient OpenSSL, likely vulnerable to Heartbleed and others"),
-    "openssl/1.0.1": ("HIGH", "OpenSSL 1.0.1 may be vulnerable to Heartbleed (CVE-2014-0160)"),
+    "apache/2.2": ("MEDIUM", "Apache 2.2.x is end-of-life; check for known CVEs", "old_apache"),
+    "apache/2.4.7": ("MEDIUM", "Apache 2.4.7 has known vulnerabilities", "old_apache"),
+    "nginx/1.1": ("MEDIUM", "Old nginx version; check for known CVEs", None),
+    "php/5": ("HIGH", "PHP 5.x is end-of-life and unsupported", "outdated_php"),
+    "php/7.0": ("MEDIUM", "PHP 7.0 is end-of-life", "outdated_php"),
+    "microsoft-iis/6.0": ("HIGH", "IIS 6.0 is very old and vulnerable to multiple CVEs", "iis6"),
+    "openssl/0.9": ("CRITICAL", "Ancient OpenSSL, likely vulnerable to Heartbleed and others", "outdated_openssl"),
+    "openssl/1.0.1": ("HIGH", "OpenSSL 1.0.1 may be vulnerable to Heartbleed (CVE-2014-0160)", "outdated_openssl"),
 }
 
 
@@ -84,9 +84,9 @@ def fingerprint(target, scheme="http", port=None, report=None):
             report.add_finding("Technology Fingerprinting", tech, f"Detected at {base_url}", "INFO")
 
         combined = f"{server} {powered_by}".lower()
-        for sig, (sev, desc) in OUTDATED_HINTS.items():
+        for sig, (sev, desc, vid) in OUTDATED_HINTS.items():
             if sig in combined:
                 report.add_finding("Technology Fingerprinting", f"Potentially outdated: {sig}",
-                                    desc, sev)
+                                    desc, sev, vuln_id=vid)
 
     return sorted(tech_found), base_url

@@ -36,7 +36,7 @@ CAT_BANNER = r"""
 """
 
 TITLE = "                    H E L L O    C A T"
-SUBTITLE = "             TryHackMe Reconnaissance Automation Tool"
+SUBTITLE = "                    Made By @.Trunith"
 TAGLINE = "  Meow-ssive recon, zero manual effort.\n"
 
 

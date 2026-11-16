@@ -17,14 +17,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 DEFAULT_PORTS = "1-1000,1433,1521,2049,3000,3306,3389,5432,5900,5985,6379,8000,8008,8080,8443,8888,9000,9090,27017"
 
 COMMON_VULN_BANNERS = {
-    "vsftpd 2.3.4": ("CRITICAL", "vsftpd 2.3.4 backdoor (CVE-2011-2523)"),
-    "proftpd 1.3.3c": ("HIGH", "ProFTPD 1.3.3c backdoor"),
-    "openssh 4.": ("MEDIUM", "Old OpenSSH version, check known CVEs"),
-    "openssh 5.": ("LOW", "Older OpenSSH version, check known CVEs"),
-    "samba 3.": ("HIGH", "Old Samba version vulnerable to multiple CVEs (e.g. CVE-2017-7494)"),
-    "apache/2.2": ("MEDIUM", "Old Apache 2.2.x, check for known CVEs"),
-    "microsoft-iis/6.0": ("HIGH", "IIS 6.0 vulnerable to CVE-2017-7269"),
-    "unrealircd": ("CRITICAL", "UnrealIRCd backdoor (CVE-2010-2075)"),
+    "vsftpd 2.3.4": ("CRITICAL", "vsftpd 2.3.4 backdoor (CVE-2011-2523)", "vsftpd_backdoor"),
+    "proftpd 1.3.3c": ("HIGH", "ProFTPD 1.3.3c backdoor", "proftpd_backdoor"),
+    "openssh 4.": ("MEDIUM", "Old OpenSSH version, check known CVEs", "old_openssh"),
+    "openssh 5.": ("LOW", "Older OpenSSH version, check known CVEs", "old_openssh"),
+    "samba 3.": ("HIGH", "Old Samba version vulnerable to multiple CVEs (e.g. CVE-2017-7494)", "old_samba"),
+    "apache/2.2": ("MEDIUM", "Old Apache 2.2.x, check for known CVEs", "old_apache"),
+    "microsoft-iis/6.0": ("HIGH", "IIS 6.0 vulnerable to CVE-2017-7269", "iis6"),
+    "unrealircd": ("CRITICAL", "UnrealIRCd backdoor (CVE-2010-2075)", "unrealircd_backdoor"),
 }
 
 
@@ -158,12 +158,14 @@ def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
         for p in open_ports:
             detail = f"{p['protocol']}/{p['port']} - {p['service']} {p['banner']}".strip()
             severity = "INFO"
+            vuln_id = None
             banner_lower = p["banner"].lower()
-            for sig, (sev, desc) in COMMON_VULN_BANNERS.items():
+            for sig, (sev, desc, vid) in COMMON_VULN_BANNERS.items():
                 if sig in banner_lower:
                     severity = sev
+                    vuln_id = vid
                     detail += f" | Possible issue: {desc}"
                     break
             report.add_finding("Port Scan", f"Open port {p['port']}/{p['protocol']}",
-                                detail, severity)
+                                detail, severity, vuln_id=vuln_id)
     return open_ports, method

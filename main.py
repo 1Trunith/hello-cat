@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Hello Cat - TryHackMe Reconnaissance Automation Tool
+Hello Cat - Made By @.Trunith
 =====================================================
 
 For use against authorized lab targets only (TryHackMe, CTF ranges,
 your own infrastructure, or systems you have written permission to test).
 
 Usage:
-    python hello-cat.py <target_ip> [options]
+    python hello-cat.py <target_ip> [options]   # non-interactive
+    python hello-cat.py                         # interactive: prompts for a target
 """
 
 import argparse
 import ipaddress
+import os
 import socket
 import sys
 
@@ -19,12 +21,17 @@ from modules import banner, port_scanner, dir_enum, subdomain_enum, tech_fingerp
 from modules.report import ReconReport
 
 
+def clear_screen():
+    os.system("cls" if os.name == "nt" else "clear")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="hello-cat.py",
         description="Hello Cat - automated TryHackMe/CTF reconnaissance tool",
     )
-    parser.add_argument("target", help="Target IP address (or hostname)")
+    parser.add_argument("target", nargs="?", default=None,
+                         help="Target IP address (or hostname). Omit to be prompted interactively.")
     parser.add_argument("--domain", help="Domain name to use for subdomain brute-forcing "
                                           "(optional, required to enable that module)")
     parser.add_argument("--ports", default=port_scanner.DEFAULT_PORTS,
@@ -36,6 +43,9 @@ def parse_args():
                          help="HTTP scheme to use for web-based modules (default: http)")
     parser.add_argument("--http-port", type=int, help="HTTP port if non-standard (default: 80/443)")
     parser.add_argument("--output", help="Save report to this base filename (adds .json/.txt)")
+    parser.add_argument("--verbose", action="store_true",
+                         help="Print full vulnerability deep-dives (cause, impact, reproduction "
+                              "steps, remediation) in the console instead of just a summary")
     parser.add_argument("--skip-ports", action="store_true", help="Skip port scanning")
     parser.add_argument("--skip-dirs", action="store_true", help="Skip directory enumeration")
     parser.add_argument("--skip-vulns", action="store_true", help="Skip vulnerability checks")
@@ -54,9 +64,26 @@ def resolve_target(target):
             sys.exit(1)
 
 
+def prompt_for_target():
+    try:
+        target = input("Enter target IP address (or hostname): ").strip()
+    except EOFError:
+        target = ""
+    if not target:
+        print("[!] No target entered. Exiting.")
+        sys.exit(1)
+    return target
+
+
 def main():
-    banner.print_banner()
     args = parse_args()
+
+    if args.target is None:
+        clear_screen()
+        banner.print_banner()
+        args.target = prompt_for_target()
+    else:
+        banner.print_banner()
 
     target_ip = resolve_target(args.target)
     print(f"[*] Target resolved to: {target_ip}")
@@ -111,7 +138,7 @@ def main():
     else:
         print("\n[*] Skipping vulnerability checks (--skip-vulns).")
 
-    report.print_console()
+    report.print_console(verbose=args.verbose)
 
     if args.output:
         json_path = f"{args.output}.json"

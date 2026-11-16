@@ -2,10 +2,15 @@
 
 Collects findings from all recon modules and renders them to the console
 with severity ratings, and optionally saves JSON and/or plain-text reports.
+Findings tagged with a vuln_id get their full deep-dive write-up (cause,
+impact, validation, reproduction steps, tools, remediation) pulled from
+modules/vuln_database.py and attached for reporting.
 """
 
 import json
 from datetime import datetime, timezone
+
+from modules.vuln_database import get_detail
 
 try:
     import colorama
@@ -24,22 +29,28 @@ SEVERITY_COLORS = {
 }
 RESET = "\033[0m"
 BOLD = "\033[1m"
+DIM = "\033[2m"
 
 
 class Finding:
-    def __init__(self, category, title, detail, severity="INFO"):
+    def __init__(self, category, title, detail, severity="INFO", vuln_id=None):
         self.category = category
         self.title = title
         self.detail = detail
         self.severity = severity.upper()
+        self.vuln_id = vuln_id
+        self.full_detail = get_detail(vuln_id) if vuln_id else None
 
     def to_dict(self):
-        return {
+        d = {
             "category": self.category,
             "title": self.title,
             "detail": self.detail,
             "severity": self.severity,
         }
+        if self.full_detail:
+            d["deep_dive"] = self.full_detail
+        return d
 
 
 class ReconReport:
@@ -50,8 +61,8 @@ class ReconReport:
         self.findings = []
         self.sections = {}
 
-    def add_finding(self, category, title, detail, severity="INFO"):
-        finding = Finding(category, title, detail, severity)
+    def add_finding(self, category, title, detail, severity="INFO", vuln_id=None):
+        finding = Finding(category, title, detail, severity, vuln_id=vuln_id)
         self.findings.append(finding)
         return finding
 
@@ -62,7 +73,25 @@ class ReconReport:
     def _sorted_findings(self):
         return sorted(self.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
 
-    def print_console(self):
+    def _print_full_detail(self, detail):
+        def _block(label, value):
+            print(f"           {BOLD}{label}:{RESET} {value}")
+
+        def _list_block(label, items):
+            print(f"           {BOLD}{label}:{RESET}")
+            for item in items:
+                print(f"             - {item}")
+
+        _block("What it is", detail["title"])
+        _block("Why it exists", detail["cause"])
+        _block("Impact", detail["impact"])
+        _block("How to validate", detail["validation"])
+        _list_block("Reproduction steps", detail["reproduction"])
+        _list_block("Relevant tools", detail["tools"])
+        _block("Remediation", detail["remediation"])
+        print()
+
+    def print_console(self, verbose=False):
         print(f"\n{BOLD}========== HELLO CAT RECON REPORT =========={RESET}")
         print(f"Target : {self.target}")
         if self.domain:
@@ -85,6 +114,10 @@ class ReconReport:
         )
         print(f"Summary: {summary}\n")
 
+        if not verbose and any(f.full_detail for f in self.findings):
+            print(f"{DIM}(Run with --verbose for full vulnerability deep-dives: "
+                  f"cause, impact, reproduction steps, and remediation){RESET}\n")
+
         current_category = None
         for f in self._sorted_findings():
             if f.category != current_category:
@@ -94,6 +127,11 @@ class ReconReport:
             print(f"[{color}{f.severity:<8}{RESET}] {f.title}")
             if f.detail:
                 print(f"           {f.detail}")
+            if f.full_detail:
+                if verbose:
+                    self._print_full_detail(f.full_detail)
+                else:
+                    print(f"           {DIM}(deep-dive available - rerun with --verbose){RESET}")
 
     def to_dict(self):
         return {
@@ -119,4 +157,14 @@ class ReconReport:
                 fh.write(f"[{f.severity}] ({f.category}) {f.title}\n")
                 if f.detail:
                     fh.write(f"    {f.detail}\n")
-            fh.write("\n")
+                if f.full_detail:
+                    d = f.full_detail
+                    fh.write(f"    Why it exists: {d['cause']}\n")
+                    fh.write(f"    Impact: {d['impact']}\n")
+                    fh.write(f"    How to validate: {d['validation']}\n")
+                    fh.write("    Reproduction steps:\n")
+                    for step in d["reproduction"]:
+                        fh.write(f"      - {step}\n")
+                    fh.write(f"    Relevant tools: {', '.join(d['tools'])}\n")
+                    fh.write(f"    Remediation: {d['remediation']}\n")
+                fh.write("\n")

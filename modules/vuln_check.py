@@ -29,7 +29,8 @@ def check_anonymous_ftp(target, open_ports, report=None):
         ftp.quit()
         if report:
             report.add_finding("Vulnerability Check", "Anonymous FTP login allowed",
-                                "FTP server accepts anonymous credentials", "HIGH")
+                                "FTP server accepts anonymous credentials", "HIGH",
+                                vuln_id="anon_ftp")
     except Exception:
         pass
 
@@ -41,7 +42,7 @@ def check_smb_signing(target, open_ports, report=None):
         report.add_finding("Vulnerability Check", "SMB service exposed",
                             "Ports 139/445 open - consider enum4linux/smbclient/smbmap for "
                             "null session, share enumeration, and EternalBlue/MS17-010 checks",
-                            "MEDIUM")
+                            "MEDIUM", vuln_id="smb_exposed")
 
 
 def check_http_methods(base_url, report=None):
@@ -54,7 +55,7 @@ def check_http_methods(base_url, report=None):
     found = [m for m in risky if m in allow]
     if found and report:
         report.add_finding("Vulnerability Check", f"Risky HTTP methods enabled: {', '.join(found)}",
-                            f"Allow header: {allow}", "MEDIUM")
+                            f"Allow header: {allow}", "MEDIUM", vuln_id="risky_http_methods")
 
 
 def check_security_headers(base_url, report=None):
@@ -68,7 +69,8 @@ def check_security_headers(base_url, report=None):
             missing.append(header)
     if missing and report:
         report.add_finding("Vulnerability Check", "Missing security headers",
-                            f"Missing: {', '.join(missing)}", "LOW")
+                            f"Missing: {', '.join(missing)}", "LOW",
+                            vuln_id="missing_security_headers")
 
 
 def check_default_creds_pages(dir_hits, report=None):
@@ -79,7 +81,8 @@ def check_default_creds_pages(dir_hits, report=None):
                 report.add_finding("Vulnerability Check",
                                     f"Login panel exposed: /{hit['path']}",
                                     "Consider testing default/weak credentials "
-                                    "(authorized lab environment only)", "MEDIUM")
+                                    "(authorized lab environment only)", "MEDIUM",
+                                    vuln_id="default_creds_panel")
 
 
 def run_checks(target, base_url, open_ports, dir_hits, report=None):
