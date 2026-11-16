@@ -39,7 +39,7 @@ vulnerability checks, then prints a single severity-rated report.
 Clone the repository:
 
 ```bash
-git clone https://github.com/username/hello-cat.git
+git clone https://github.com/1Trunith/hello-cat.git
 cd hello-cat
 ```
 
