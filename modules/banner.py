@@ -9,19 +9,20 @@ try:
 except ImportError:
     _CYAN = _MAGENTA = _YELLOW = _BOLD = _RESET = ""
 
-CAT_BANNER = r"""
- /\_/\
-( #.# )
- > ^ <
-"""
+CAT_LINES = [
+    " /\\_/\\ ",
+    "( #.# )",
+    " > ^ < ",
+]
 
-TITLE = "H E L L O    C A T"
+TITLE = "HELLO CAT"
 SUBTITLE = "Made By @.Trunith"
-TAGLINE = "  Meow-ssive recon, zero manual effort.\n"
+TAGLINE = "Meow-ssive recon, zero manual effort."
 
 
 def print_banner():
-    print(f"{_MAGENTA}{CAT_BANNER}{_RESET}")
-    print(f"{_BOLD}{_CYAN}{TITLE}{_RESET}")
-    print(f"{_CYAN}{SUBTITLE}{_RESET}\n")
-    print(f"{_YELLOW}{TAGLINE}{_RESET}")
+    print()
+    print(f"{_MAGENTA}{CAT_LINES[0]}{_RESET}  {_BOLD}{_CYAN}{TITLE}{_RESET}")
+    print(f"{_MAGENTA}{CAT_LINES[1]}{_RESET}  {_CYAN}{SUBTITLE}{_RESET}")
+    print(f"{_MAGENTA}{CAT_LINES[2]}{_RESET}")
+    print(f"\n{_YELLOW}{TAGLINE}{_RESET}\n")

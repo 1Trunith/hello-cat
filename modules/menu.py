@@ -20,7 +20,7 @@ try:
 except ImportError:
     _CYAN = _YELLOW = _GREEN = _BOLD = _RESET = ""
 
-MENU_TEXT = """{bold}{cyan}       MADE BY @.TRUNITH{reset}
+MENU_TEXT = """{bold}{cyan}  MAIN MENU{reset}
   ============================
 
   {green}[1]{reset} Run Scan
