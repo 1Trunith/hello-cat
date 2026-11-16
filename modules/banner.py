@@ -10,23 +10,18 @@ except ImportError:
     _CYAN = _MAGENTA = _YELLOW = _BOLD = _RESET = ""
 
 CAT_BANNER = r"""
-                #           #
-               ###         ###
-              #####       #####
-          ####    #### ####    ####
-         ####    ####   ####    ####
-        #############################
-(                                           )
-(                 #       #                 )
-(                                           )
-(                     .                     )
-(                                           )
-(             >       ^       <             )
-(                                           )
+         /\________/\
+       /              \
+      /                \
+     (    ##      ##    )
+      \                /
+       \      ..      /
+        \            /
+         >    ^^    <
 """
 
-TITLE = "H E L L O    C A T".center(45)
-SUBTITLE = "Made By @.Trunith".center(45)
+TITLE = "H E L L O    C A T".center(30)
+SUBTITLE = "Made By @.Trunith".center(30)
 TAGLINE = "  Meow-ssive recon, zero manual effort.\n"
 
 
