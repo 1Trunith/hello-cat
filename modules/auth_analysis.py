@@ -5,6 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from modules.progress import ProgressBar
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 BUNDLED_USERNAMES = os.path.join(os.path.dirname(__file__), "..", "wordlists", "common_usernames.txt")
@@ -623,12 +625,16 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
             password_path = BUNDLED_PASSWORDS
             password_source = "bundled common-password list"
 
+    total_passwords = wordlist_tools.count_lines(password_path, cap=2_000_000)
+    estimated_total = len(usernames) * total_passwords if total_passwords < 2_000_000 else None
+
     if report:
         report.add_finding("Authentication Testing",
                             f"HTTP form brute force starting: {len(usernames)} username(s)",
                             f"Usernames: {username_source} | Passwords: {password_source}",
                             "INFO")
 
+    bar = ProgressBar(total=estimated_total, label="Brute-forcing login form")
     baseline_len = len(resp.text or "")
     session = requests.Session()
     session.verify = False
@@ -669,6 +675,7 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
 
                 with lock:
                     counters["attempts"] += 1
+                bar.update(current=counters["attempts"])
 
                 body = (attempt.text or "").lower()
                 looks_like_failure = any(ind in body for ind in failure_indicators)
@@ -727,6 +734,7 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
             t.join(timeout=5)
 
     if result_holder.get("username"):
+        bar.finish(f"Credentials found after {result_holder['attempts']} attempt(s)")
         if report:
             report.add_finding(
                 "Authentication Testing",
@@ -736,6 +744,7 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
             )
         return result_holder
 
+    bar.finish(f"Stopped after {counters['attempts']} attempt(s)")
     if report:
         if interrupted:
             report.add_finding("Authentication Testing", "HTTP form brute force interrupted by user",

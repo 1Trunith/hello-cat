@@ -63,6 +63,9 @@ restart, no reinstall.
 ## Features
 
 - Purple ASCII cat banner on every launch
+- Live purple progress bars with percentage for every long-running task
+  (port scanning, directory/subdomain brute-forcing, WordPress plugin/
+  theme checks, XSS parameter testing, login brute force)
 - One-time setup, persistent virtual environment, instant reusable launch
 - Interactive menu that stays open across scans
 - Port scanning with `nmap` (service/version detection) when available,
@@ -315,7 +318,8 @@ hello-cat/
 │   ├── vuln_check.py          # Common vulnerability checks
 │   ├── vuln_database.py       # Deep-dive vulnerability knowledge base
 │   ├── history.py              # Persistent scan history
-│   └── report.py              # Severity-rated reporting + JSON/text export
+│   ├── report.py              # Severity-rated reporting + JSON/text export
+│   └── progress.py              # Purple terminal progress bars
 ├── wordlists/
 │   ├── common_dirs.txt
 │   └── common_subdomains.txt

@@ -6,6 +6,8 @@ import os
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from modules.progress import ProgressBar
+
 DEFAULT_PORTS = "1-1000,1433,1521,2049,3000,3306,3389,5432,5900,5985,6379,8000,8008,8080,8443,8888,9000,9090,27017"
 
 COMMON_VULN_BANNERS = {
@@ -124,6 +126,7 @@ def _scan_single_port(target, port, timeout=1.0):
 def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
     results = []
     port_list = _expand_ports(ports)
+    bar = ProgressBar(total=len(port_list), label="Scanning ports")
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {
             executor.submit(_scan_single_port, target, port, timeout): port
@@ -133,6 +136,8 @@ def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
             res = future.result()
             if res:
                 results.append(res)
+            bar.update()
+    bar.finish(f"Port scan complete - {len(results)} open")
     return sorted(results, key=lambda r: r["port"])
 
 

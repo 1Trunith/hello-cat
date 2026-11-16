@@ -2,6 +2,8 @@ import os
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from modules.progress import ProgressBar
+
 BUNDLED_WORDLIST = os.path.join(os.path.dirname(__file__), "..", "wordlists", "common_subdomains.txt")
 
 
@@ -35,12 +37,15 @@ def enumerate_subdomains(domain=None, wordlist_path=None, threads=50, report=Non
     words = _load_words(wordlist_file)
 
     found = []
+    bar = ProgressBar(total=len(words), label="Brute-forcing subdomains")
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {executor.submit(_resolve, w, domain): w for w in words}
         for future in as_completed(futures):
             result = future.result()
             if result:
                 found.append(result)
+            bar.update()
+    bar.finish(f"Subdomain brute force complete - {len(found)} found")
 
     found.sort(key=lambda r: r["subdomain"])
 

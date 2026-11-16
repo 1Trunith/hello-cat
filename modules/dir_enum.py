@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from modules.progress import ProgressBar
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 BUNDLED_WORDLIST = os.path.join(os.path.dirname(__file__), "..", "wordlists", "common_dirs.txt")
@@ -74,12 +76,15 @@ def enumerate_dirs(target, scheme="http", port=None, wordlist_path=None,
 
     hits = []
     if words:
+        bar = ProgressBar(total=len(words), label="Brute-forcing directories")
         with ThreadPoolExecutor(max_workers=threads) as executor:
             futures = {executor.submit(_check_path, base_url, w): w for w in words}
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     hits.append(result)
+                bar.update()
+        bar.finish(f"Directory brute force complete - {len(hits)} found")
 
     hits.sort(key=lambda h: h["path"])
 

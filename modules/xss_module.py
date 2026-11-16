@@ -7,6 +7,8 @@ import requests
 from bs4 import BeautifulSoup
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from modules.progress import ProgressBar
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 COMMON_PARAMS = ["q", "search", "query", "id", "name", "page", "category",
@@ -84,7 +86,9 @@ def scan_reflected(target_url, report=None):
     existing_params = list(parse_qs(parsed.query).keys())
     params_to_test = sorted(set(existing_params + COMMON_PARAMS))
 
+    bar = ProgressBar(total=len(params_to_test), label=f"Testing reflected XSS on {target_url}")
     for param in params_to_test:
+        bar.update()
         token = _token()
         for payload, category in payload_templates(token):
             marker = f"xsscat{token}"
@@ -121,6 +125,7 @@ def scan_reflected(target_url, report=None):
                         "appears to have been partially sanitized - try additional bypass variants manually",
                         "MEDIUM",
                     )
+    bar.finish(f"{len([f for f in findings if f['type'] == 'reflected'])} reflected XSS finding(s)")
     if not findings and report:
         report.add_finding("XSS Exploitation", "No reflected XSS found in tested parameters",
                             f"Tested parameters: {', '.join(params_to_test)} on {target_url}", "INFO")

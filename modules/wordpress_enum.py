@@ -4,6 +4,8 @@ import requests
 from bs4 import BeautifulSoup
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from modules.progress import ProgressBar
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 COMMON_PLUGINS = [
@@ -67,14 +69,18 @@ def get_version(base_url, homepage_resp):
 
 def enumerate_plugins_themes(base_url, threads=1):
     found_plugins, found_themes = [], []
+    bar = ProgressBar(total=len(COMMON_PLUGINS) + len(COMMON_THEMES), label="Checking plugins/themes")
     for slug in COMMON_PLUGINS:
         resp = _get(f"{base_url}/wp-content/plugins/{slug}/")
         if resp and resp.status_code in (200, 403):
             found_plugins.append(slug)
+        bar.update()
     for slug in COMMON_THEMES:
         resp = _get(f"{base_url}/wp-content/themes/{slug}/")
         if resp and resp.status_code in (200, 403):
             found_themes.append(slug)
+        bar.update()
+    bar.finish(f"{len(found_plugins)} plugin(s), {len(found_themes)} theme(s) found")
     return found_plugins, found_themes
 
 
