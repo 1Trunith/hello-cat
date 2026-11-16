@@ -343,13 +343,17 @@ def auth_brute_force_http(state):
     base_url = f"{state.scheme}://{target}"
     if state.http_port and state.http_port not in (80, 443):
         base_url += f":{state.http_port}"
-    login_url = prompt_path(f"Login page URL [{base_url}]") or base_url
-    userlist = prompt_path("Path to username wordlist (blank = auto-discover usernames)")
-    passlist = prompt_path("Path to password wordlist (blank = use bundled common passwords)")
+    login_url = prompt_path(f"Login page URL (full path, query string, etc. all fine) [{base_url}]") or base_url
+    userlist = prompt_path("Path to username wordlist (blank = auto-detect: WordPress users, "
+                            "then SecLists, then bundled list)")
+    passlist = prompt_path("Path to password wordlist (blank = auto-detect rockyou.txt, "
+                            "else bundled common-password list)")
 
     report = ReconReport(target=target)
     if not userlist:
-        print("[*] No username list given - auto-discovering candidate usernames...")
+        print("[*] No username list given - detecting site type and auto-discovering usernames...")
+    if not passlist:
+        print("[*] No password list given - checking for rockyou.txt...")
     result = auth_analysis.brute_force_http_form(login_url, userlist, passlist, report=report)
     report.print_console(verbose=state.verbose)
     history.save_scan(report)

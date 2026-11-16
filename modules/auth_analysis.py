@@ -530,29 +530,56 @@ def _load_wordlist_or_default(path, default_path):
         return [l.strip() for l in fh if l.strip()]
 
 
-def discover_candidate_usernames(login_url):
-    usernames = set()
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(login_url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
-        base_url = None
+def _base_url_of(login_url):
+    from urllib.parse import urlparse
+    parsed = urlparse(login_url)
+    return f"{parsed.scheme}://{parsed.netloc}"
 
-    if base_url:
-        try:
-            from modules import wordpress_enum
-            is_wp, _ = wordpress_enum.detect_wordpress(base_url)
-            if is_wp:
-                found = wordpress_enum.enumerate_users_rest(base_url)
-                if not found:
-                    found = wordpress_enum.enumerate_users_author_archive(base_url)
-                usernames.update(u for u in found if u)
-        except Exception:
-            pass
 
-    usernames.update(_load_wordlist_or_default(None, BUNDLED_USERNAMES))
-    return sorted(usernames)
+def detect_site_type(base_url):
+    from modules import wordpress_enum
+    is_wp, resp = wordpress_enum.detect_wordpress(base_url)
+    if is_wp:
+        return "wordpress", resp
+    if not resp:
+        resp = _get(base_url)
+    site_type = "generic"
+    if resp:
+        powered_by = resp.headers.get("X-Powered-By", "").lower()
+        cookie_names = [c.lower() for c in resp.cookies.keys()]
+        is_php = ("php" in powered_by or any("phpsessid" in c for c in cookie_names)
+                  or (resp.url or "").lower().endswith(".php"))
+        if is_php:
+            site_type = "php"
+    return site_type, resp
+
+
+def discover_candidate_usernames(login_url, report=None):
+    from modules import wordpress_enum, wordlist_tools
+
+    base_url = _base_url_of(login_url)
+    site_type, _ = detect_site_type(base_url)
+
+    if report:
+        report.add_finding("Authentication Testing", f"Site type detected: {site_type}",
+                            f"Used to decide the username discovery strategy for {base_url}", "INFO")
+
+    if site_type == "wordpress":
+        found = wordpress_enum.enumerate_users_rest(base_url)
+        if not found:
+            found = wordpress_enum.enumerate_users_author_archive(base_url)
+        found = sorted({u for u in found if u})
+        if found:
+            return {"usernames": found, "source": "WordPress user enumeration (/wp-json, author archive)",
+                    "site_type": site_type}
+
+    seclists_path = wordlist_tools.resolve_username_source()
+    if seclists_path:
+        return {"usernames": wordlist_tools.load_list(seclists_path),
+                "source": f"SecLists ({seclists_path})", "site_type": site_type}
+
+    return {"usernames": _load_wordlist_or_default(None, BUNDLED_USERNAMES),
+            "source": "bundled common-username list", "site_type": site_type}
 
 
 def _has_dynamic_token(form):
@@ -561,7 +588,11 @@ def _has_dynamic_token(form):
 
 
 def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
-                           max_attempts=5000, report=None):
+                           threads=10, max_attempts=None, report=None):
+    import queue
+    import threading
+    from modules import wordlist_tools
+
     resp = _get(login_url, allow_redirects=True)
     if not resp:
         return None
@@ -576,16 +607,25 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
         usernames = _load_wordlist_or_default(userlist_path, None)
         username_source = f"supplied list ({userlist_path})"
     else:
-        usernames = discover_candidate_usernames(login_url)
-        username_source = "auto-discovered (WordPress user enum + bundled common-username list)"
+        discovered = discover_candidate_usernames(login_url, report=report)
+        usernames = discovered["usernames"]
+        username_source = discovered["source"]
 
-    passwords = _load_wordlist_or_default(passlist_path, BUNDLED_PASSWORDS)
-    password_source = passlist_path if passlist_path else "bundled common-password list"
+    if passlist_path:
+        password_path = passlist_path
+        password_source = passlist_path
+    else:
+        rockyou_path = wordlist_tools.resolve_password_source()
+        if rockyou_path:
+            password_path = rockyou_path
+            password_source = f"rockyou ({rockyou_path})"
+        else:
+            password_path = BUNDLED_PASSWORDS
+            password_source = "bundled common-password list"
 
     if report:
         report.add_finding("Authentication Testing",
-                            f"HTTP form brute force starting: {len(usernames)} username(s) x "
-                            f"{len(passwords)} password(s)",
+                            f"HTTP form brute force starting: {len(usernames)} username(s)",
                             f"Usernames: {username_source} | Passwords: {password_source}",
                             "INFO")
 
@@ -593,47 +633,120 @@ def brute_force_http_form(login_url, userlist_path=None, passlist_path=None,
     session = requests.Session()
     session.verify = False
     failure_indicators = ["invalid", "incorrect", "failed", "error", "denied", "try again"]
+    lockout_keywords = ["locked", "too many attempts", "try again later", "temporarily disabled"]
+    lockout_threshold = 5
     dynamic_token = _has_dynamic_token(form)
 
-    attempts = 0
-    for username in usernames:
-        for password in passwords:
-            attempts += 1
-            if attempts > max_attempts:
-                break
+    stop_event = threading.Event()
+    lock = threading.Lock()
+    result_holder = {}
+    counters = {"attempts": 0, "lockout_hits": 0}
+    work_queue = queue.Queue(maxsize=threads * 4)
 
-            if dynamic_token:
-                fresh_resp = _get(login_url, allow_redirects=True)
-                fresh_form = _extract_login_form(fresh_resp.text, login_url) if fresh_resp else None
-                if not fresh_form:
-                    continue
-                form = fresh_form
-
-            payload = dict(form["extra_fields"])
-            payload[form["user_field"]] = username
-            payload[form["pass_field"]] = password
+    def worker():
+        while not stop_event.is_set():
+            item = work_queue.get()
             try:
-                attempt = session.post(form["action"], data=payload, timeout=6,
-                                        verify=False, allow_redirects=True)
-            except requests.RequestException:
-                continue
-            body = (attempt.text or "").lower()
-            looks_like_failure = any(ind in body for ind in failure_indicators)
-            length_changed = abs(len(attempt.text or "") - baseline_len) > 200
-            redirected_away = attempt.url != login_url and attempt.history
-            if (length_changed or redirected_away) and not looks_like_failure:
-                if report:
-                    report.add_finding(
-                        "Authentication Testing",
-                        f"HTTP form credentials found: {username}:{password}",
-                        f"Discovered after {attempts} attempt(s) against {login_url}",
-                        "CRITICAL", vuln_id="brute_force_success",
-                    )
-                return {"username": username, "password": password, "attempts": attempts}
+                if item is None:
+                    return
+                username, password = item
+                current_form = form
+                if dynamic_token:
+                    fresh_resp = _get(login_url, allow_redirects=True)
+                    fresh_form = _extract_login_form(fresh_resp.text, login_url) if fresh_resp else None
+                    if not fresh_form:
+                        continue
+                    current_form = fresh_form
+
+                payload = dict(current_form["extra_fields"])
+                payload[current_form["user_field"]] = username
+                payload[current_form["pass_field"]] = password
+                try:
+                    attempt = session.post(current_form["action"], data=payload, timeout=6,
+                                            verify=False, allow_redirects=True)
+                except requests.RequestException:
+                    continue
+
+                with lock:
+                    counters["attempts"] += 1
+
+                body = (attempt.text or "").lower()
+                looks_like_failure = any(ind in body for ind in failure_indicators)
+                is_lockout = any(k in body for k in lockout_keywords)
+                if is_lockout:
+                    with lock:
+                        counters["lockout_hits"] += 1
+                        if counters["lockout_hits"] >= lockout_threshold:
+                            stop_event.set()
+                    continue
+
+                length_changed = abs(len(attempt.text or "") - baseline_len) > 200
+                redirected_away = attempt.url != login_url and attempt.history
+                if (length_changed or redirected_away) and not looks_like_failure:
+                    with lock:
+                        if "username" not in result_holder:
+                            result_holder["username"] = username
+                            result_holder["password"] = password
+                            result_holder["attempts"] = counters["attempts"]
+                    stop_event.set()
+            finally:
+                work_queue.task_done()
+
+    worker_threads = [threading.Thread(target=worker, daemon=True) for _ in range(threads)]
+    for t in worker_threads:
+        t.start()
+
+    interrupted = False
+    try:
+        for username in usernames:
+            if stop_event.is_set():
+                break
+            for password in wordlist_tools.iter_wordlist(password_path):
+                if stop_event.is_set():
+                    break
+                if max_attempts and counters["attempts"] >= max_attempts:
+                    stop_event.set()
+                    break
+                while not stop_event.is_set():
+                    try:
+                        work_queue.put((username, password), timeout=0.5)
+                        break
+                    except queue.Full:
+                        continue
+    except KeyboardInterrupt:
+        interrupted = True
+        stop_event.set()
+    finally:
+        stop_event.set()
+        for _ in worker_threads:
+            try:
+                work_queue.put_nowait(None)
+            except queue.Full:
+                pass
+        for t in worker_threads:
+            t.join(timeout=5)
+
+    if result_holder.get("username"):
+        if report:
+            report.add_finding(
+                "Authentication Testing",
+                f"HTTP form credentials found: {result_holder['username']}:{result_holder['password']}",
+                f"Discovered after {result_holder['attempts']} attempt(s) against {login_url}",
+                "CRITICAL", vuln_id="brute_force_success",
+            )
+        return result_holder
 
     if report:
-        report.add_finding("Authentication Testing", "HTTP form brute force: no valid credentials found",
-                            f"Tried {attempts} combination(s) against {login_url}", "INFO")
+        if interrupted:
+            report.add_finding("Authentication Testing", "HTTP form brute force interrupted by user",
+                                f"{counters['attempts']} attempt(s) made before stopping", "INFO")
+        elif counters["lockout_hits"] >= lockout_threshold:
+            report.add_finding("Authentication Testing", "HTTP form brute force aborted - lockout detected",
+                                f"{counters['attempts']} attempt(s) made before an account lockout "
+                                "indication appeared repeatedly; stopped to avoid further noise", "INFO")
+        else:
+            report.add_finding("Authentication Testing", "HTTP form brute force: no valid credentials found",
+                                f"Tried {counters['attempts']} combination(s) against {login_url}", "INFO")
     return None
 
 

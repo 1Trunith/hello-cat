@@ -1,4 +1,71 @@
+import gzip
+import os
 import re
+import shutil
+import tempfile
+
+ROCKYOU_CANDIDATES = [
+    "/usr/share/wordlists/rockyou.txt",
+    "/usr/share/wordlists/rockyou.txt.gz",
+    "/usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt",
+    "/usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt.gz",
+]
+
+SECLISTS_USERNAME_CANDIDATES = [
+    "/usr/share/seclists/Usernames/top-usernames-shortlist.txt",
+    "/usr/share/seclists/Usernames/Names/names.txt",
+    "/usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt",
+]
+
+_ROCKYOU_CACHE = os.path.join(tempfile.gettempdir(), "hello_cat_rockyou_cache.txt")
+
+
+def _decompress_gz(gz_path, dest_path):
+    if os.path.isfile(dest_path):
+        return dest_path
+    with gzip.open(gz_path, "rb") as src, open(dest_path, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    return dest_path
+
+
+def resolve_password_source(custom_path=None):
+    if custom_path and os.path.isfile(custom_path):
+        return custom_path
+    for candidate in ROCKYOU_CANDIDATES:
+        if candidate.endswith(".gz") and os.path.isfile(candidate):
+            return _decompress_gz(candidate, _ROCKYOU_CACHE)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def resolve_username_source(custom_path=None):
+    if custom_path and os.path.isfile(custom_path):
+        return custom_path
+    for candidate in SECLISTS_USERNAME_CANDIDATES:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def iter_wordlist(path):
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                yield line
+
+
+def count_lines(path, cap=None):
+    count = 0
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            if line.strip():
+                count += 1
+                if cap and count >= cap:
+                    return count
+    return count
+
 
 CREDENTIAL_PATTERNS = [
     re.compile(r"([A-Za-z0-9_.+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9-.]+)\s*[:,|]\s*(\S+)"),

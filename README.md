@@ -110,7 +110,7 @@ restart, no reinstall.
 | Option | Description |
 |---|---|
 | `[1]` Brute Force a Service | SSH/FTP/SMB/RDP via Hydra, Medusa, or Ncrack (whichever is installed) |
-| `[2]` Brute Force HTTP Login Form | Dictionary attack against a detected login form. Leave the username/password lists blank to auto-discover usernames (WordPress user enum + bundled list) and use the bundled common-password list; handles CSRF-token-protected forms by refreshing the token each attempt |
+| `[2]` Brute Force HTTP Login Form | Multi-threaded dictionary attack against any login URL (full paths/ports/query strings supported). Detects site type (WordPress/PHP/generic); on WordPress, pulls real usernames via `/wp-json`/author-archive enumeration. Leaving the password list blank auto-detects `rockyou.txt` (else a bundled list); leaving the username list blank auto-detects a SecLists username list (else a bundled list). Stops immediately on success, and aborts early if it detects an account-lockout response. Handles CSRF-token-protected forms by refreshing the token each attempt |
 | `[3]` Password Spray | One password against many usernames (lower lockout risk than per-user brute force) |
 | `[4]` Default Credential Check | Tries a small built-in default credential list against a service |
 | `[5]` Validate a Single Credential Pair | Confirms one specific username/password against a login form |
