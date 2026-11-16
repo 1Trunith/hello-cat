@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from modules import banner, port_scanner, dir_enum, subdomain_enum, tech_fingerprint, vuln_check
-from modules import wordpress_enum, auth_analysis, dns_tls, history, netutils, menu
+from modules import wordpress_enum, auth_analysis, dns_tls, history, netutils, menu, xss_module
 from modules.report import ReconReport
 
 
@@ -31,6 +31,9 @@ def parse_args():
     parser.add_argument("--skip-vulns", action="store_true")
     parser.add_argument("--skip-authtest", action="store_true",
                          help="Skip default credential testing in Web Application Analysis")
+    parser.add_argument("--run-xss", action="store_true",
+                         help="Run the active XSS exploitation module (injects payloads into "
+                              "parameters and forms - opt-in since it may submit data to the target)")
     return parser.parse_args()
 
 
@@ -105,6 +108,13 @@ def run_cli(args):
     auth_analysis.run_analysis(target_ip, scheme=args.scheme, port=http_port,
                                 dir_hits=dir_hits, report=report,
                                 skip_authtest=args.skip_authtest)
+
+    if args.run_xss:
+        print("\n[*] Running XSS exploitation module...")
+        xss_module.run(target_ip, scheme=args.scheme, port=http_port,
+                        dir_hits=dir_hits, report=report)
+    else:
+        print("\n[*] Skipping XSS exploitation module (pass --run-xss to enable).")
 
     report.print_console(verbose=args.verbose)
     history.save_scan(report)

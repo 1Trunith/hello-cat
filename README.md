@@ -102,6 +102,7 @@ restart, no reinstall.
 | `[6]` View Previous Scan Results | Browse and reopen saved scans from `scan_history/` |
 | `[7]` Change Target IP / Domain | Update the active target/domain for subsequent menu actions |
 | `[8]` Authentication & Credential Testing | Submenu: brute force, hash cracking, wordlist/username tools, token analysis, log analysis |
+| `[9]` XSS Exploitation Module | Reflected, stored, and DOM-based XSS detection with filter-bypass payloads and impact demonstration |
 | `[0]` Clear Terminal | Redraws the banner and menu |
 | `[99]` Exit | Quits the tool |
 
@@ -181,6 +182,44 @@ rather than a reimplementation here.
 | Session Hijacking Risk Analyzer | `auth_analysis.assess_session_hijacking_risk` (in `[4]`) |
 | Authentication Report Generator | The existing severity-rated report/history system (`report.py`, `vuln_database.py`) |
 
+## XSS Exploitation Module (`[9]`)
+
+A dedicated module for TryHackMe-style XSS labs, in `modules/xss_module.py`:
+
+- **Reflected XSS** — injects a payload set (including filter-bypass
+  variants: case variation, no-space SVG, nested-tag bypass, attribute
+  breakout, `javascript:` URIs, etc.) into every query parameter on the
+  target URL plus common parameter names, and checks for unescaped
+  reflection in the response
+- **Stored XSS** — discovers forms on the page, submits a payload through
+  each text field, then re-checks the original page and the form's own
+  page for the payload rendering back unescaped
+- **DOM-based XSS** — statically scans inline and linked JavaScript for
+  attacker-controllable sources (`location.hash`, `location.search`,
+  `document.referrer`, `window.name`) flowing into dangerous sinks
+  (`innerHTML`, `document.write`, `eval`, etc.)
+- **Context-aware severity** — classifies whether a reflection lands in
+  the HTML body, an attribute, a script block, or a comment, to judge how
+  likely it is to actually execute
+- **Impact demonstration** — when a confirmed XSS exists and the session
+  cookie lacks the `HttpOnly` flag, shows exactly what `document.cookie`
+  would expose to an injected script (using the cookie value the tool
+  already has from the HTTP response)
+- **Honest reporting** — raw-reflection detection is a strong signal but
+  not a browser-confirmed execution; the report says so. If `selenium`
+  and a browser driver are installed, `xss_module.try_confirm_with_browser`
+  can load the page headlessly and check for a real JS side effect for a
+  genuine confirmation instead of a heuristic
+
+Every finding records the vulnerable URL, the exact injection point
+(parameter name or form), the payload used, the reflection context, and
+a full cause/impact/reproduction/remediation write-up.
+
+This is active testing (it submits data to forms and injects payloads
+into parameters) — the interactive menu requires typing `YES` to confirm
+authorization before it runs, same as the brute-force actions. In
+non-interactive/CLI mode it's opt-in via `--run-xss`.
+
 ## Non-Interactive / Scripted Usage
 
 Passing a target directly on the command line skips the menu entirely and
@@ -205,6 +244,7 @@ runs the full pipeline once, for automation or CI-style usage:
 | `--verbose` | Print full vulnerability deep-dives in the console |
 | `--skip-ports` / `--skip-dirs` / `--skip-vulns` | Skip the respective stage |
 | `--skip-authtest` | Skip default credential testing in web application analysis |
+| `--run-xss` | Run the XSS exploitation module (opt-in; injects payloads into parameters and forms) |
 
 ## Deep Vulnerability Analysis
 
@@ -266,6 +306,7 @@ hello-cat/
 │   ├── dns_tls.py              # Reverse DNS, TLS inspection, recommendations
 │   ├── wordpress_enum.py       # WordPress-specific enumeration
 │   ├── auth_analysis.py        # Login/SQLi/session/credential analysis
+│   ├── xss_module.py            # Reflected/stored/DOM XSS detection + exploitation
 │   ├── bruteforce.py            # Hydra/Medusa/Ncrack wrappers, password spray
 │   ├── hash_tools.py            # Hash identification, Hashcat/John wrappers
 │   ├── wordlist_tools.py        # Wordlist manager, generators, extractor

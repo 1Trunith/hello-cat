@@ -1,4 +1,94 @@
 VULN_DB = {
+    "xss_reflected": {
+        "title": "Reflected Cross-Site Scripting (XSS)",
+        "cause": "User-supplied input from a URL parameter is written back "
+                  "into the HTML response without proper output encoding or "
+                  "sanitization, so HTML/JavaScript in the input is parsed "
+                  "as markup instead of being treated as plain text.",
+        "impact": "An attacker who gets a victim to click a crafted link "
+                   "can execute arbitrary JavaScript in the victim's "
+                   "browser session on the vulnerable site - session "
+                   "cookie theft (if not HttpOnly), keylogging, defacement, "
+                   "forced actions, or redirecting to phishing pages, all "
+                   "with the victim's own authenticated privileges.",
+        "validation": "Load the vulnerable URL in a real browser and "
+                       "confirm the injected script actually executes "
+                       "(e.g. an alert box appears) rather than relying on "
+                       "the raw-reflection heuristic alone.",
+        "reproduction": [
+            "Open the reported URL directly in a browser",
+            "Confirm the payload executes (alert/console output) rather "
+            "than being displayed as escaped text",
+            "If it fires, try chaining it: document.cookie, "
+            "fetch('/api/me'), or DOM manipulation to demonstrate impact",
+        ],
+        "tools": ["Browser", "Burp Suite", "XSStrike"],
+        "remediation": "HTML-encode all user input before rendering it "
+                        "into HTML context (and use context-aware encoding "
+                        "for attribute/JS/URL contexts specifically), and "
+                        "add a Content-Security-Policy as defense in depth.",
+    },
+    "xss_stored": {
+        "title": "Stored (Persistent) Cross-Site Scripting (XSS)",
+        "cause": "Input submitted through a form (comment, profile field, "
+                  "message, etc.) is stored server-side and later rendered "
+                  "back into a page without output encoding, so it affects "
+                  "every visitor who views that stored content, not just "
+                  "the original requester.",
+        "impact": "CRITICAL - every user who views the page containing the "
+                   "stored payload (including administrators) has the "
+                   "injected script executed in their session, making this "
+                   "more dangerous than reflected XSS and a common path to "
+                   "full account/application takeover.",
+        "validation": "Confirm the payload persists and executes by "
+                       "loading the page where it was rendered in a real "
+                       "browser, ideally from a separate session/account "
+                       "than the one that submitted it.",
+        "reproduction": [
+            "Submit the payload through the identified form",
+            "Browse to the page where submissions are displayed "
+            "(comments list, profile view, admin panel, etc.)",
+            "Confirm the script executes for a viewer of that page",
+        ],
+        "tools": ["Browser", "Burp Suite"],
+        "remediation": "Encode all stored user content on output (not just "
+                        "on input), validate/sanitize on the way in with an "
+                        "allow-list approach (e.g. a vetted HTML sanitizer "
+                        "if rich text is required), and apply a strict "
+                        "Content-Security-Policy.",
+    },
+    "xss_dom_suspected": {
+        "title": "Potential DOM-Based XSS (Static Detection)",
+        "cause": "Client-side JavaScript reads an attacker-controllable "
+                  "source (location.hash, location.search, "
+                  "document.referrer, window.name, etc.) and passes it into "
+                  "a dangerous DOM sink (innerHTML, document.write, eval, "
+                  "jQuery .html(), etc.) without sanitization - entirely in "
+                  "the browser, so it never touches server logs.",
+        "impact": "If exploitable, allows arbitrary JavaScript execution in "
+                   "the victim's browser via a crafted URL, with the same "
+                   "impact range as reflected XSS, but is often missed by "
+                   "server-side scanners since the vulnerable data flow "
+                   "happens entirely client-side.",
+        "validation": "This is static pattern matching only (source and "
+                       "sink found in the same script) - it does not "
+                       "confirm the data actually flows from the source to "
+                       "the sink unsanitized. Manually trace the code path "
+                       "and test with a real payload in the browser.",
+        "reproduction": [
+            "Review the flagged script for how the source value reaches "
+            "the sink (look for sanitization/encoding in between)",
+            "Craft a URL exercising that source (e.g. "
+            "#<img src=x onerror=alert(1)> for location.hash)",
+            "Load it in a browser and confirm execution",
+        ],
+        "tools": ["Browser DevTools", "Burp Suite", "manual source review"],
+        "remediation": "Avoid passing untrusted data into innerHTML/"
+                        "document.write/eval; use textContent or a "
+                        "sanitizing library (e.g. DOMPurify) when HTML "
+                        "insertion is required, and apply a strict "
+                        "Content-Security-Policy.",
+    },
     "brute_force_success": {
         "title": "Credentials Recovered via Brute Force / Dictionary Attack",
         "cause": "A service accepted a username/password combination found "

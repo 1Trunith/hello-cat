@@ -5,6 +5,7 @@ from modules import (
     banner, port_scanner, dir_enum, subdomain_enum, tech_fingerprint,
     vuln_check, wordpress_enum, auth_analysis, dns_tls, history, netutils,
     bruteforce, hash_tools, wordlist_tools, token_analysis, log_analysis,
+    xss_module,
 )
 from modules.report import ReconReport
 from modules.main_utils import clear_screen
@@ -30,6 +31,7 @@ MENU_TEXT = """{bold}{cyan}       MADE BY @.TRUNITH{reset}
   {green}[6]{reset} View Previous Scan Results
   {green}[7]{reset} Change Target IP / Domain
   {green}[8]{reset} Authentication & Credential Testing
+  {green}[9]{reset} XSS Exploitation Module
   {yellow}[0]{reset} Clear Terminal
   {yellow}[99]{reset} Exit
 
@@ -236,6 +238,24 @@ def run_dns_discovery(state):
     auto_detect_domain(state, dns_result.get("hostname"))
     if state.domain:
         subdomain_enum.enumerate_subdomains(domain=state.domain, threads=state.threads, report=report)
+    report.print_console(verbose=state.verbose)
+    history.save_scan(report)
+    pause()
+
+
+def run_xss_module(state):
+    if not confirm_authorized("Active XSS testing: injects payloads into parameters and forms."):
+        pause()
+        return
+    target = prompt_target(state)
+    if not target:
+        print("[!] No target provided.")
+        return
+    state.target = target
+    report = ReconReport(target=target, domain=state.domain)
+    print(f"\n[*] Running XSS exploitation module against {target}...")
+    xss_module.run(target, scheme=state.scheme, port=state.http_port,
+                    dir_hits=state.last_dir_hits, report=report)
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     pause()
@@ -615,6 +635,7 @@ HANDLERS = {
     "6": view_previous_scans,
     "7": change_target,
     "8": run_auth_menu,
+    "9": run_xss_module,
 }
 
 
