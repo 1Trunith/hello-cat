@@ -75,16 +75,24 @@ def enumerate_dirs(target, scheme="http", port=None, wordlist_path=None,
     words = _load_words(wordlist_file)
 
     hits = []
+    interrupted = False
     if words:
         bar = ProgressBar(total=len(words), label="Brute-forcing directories")
-        with ThreadPoolExecutor(max_workers=threads) as executor:
+        executor = ThreadPoolExecutor(max_workers=threads)
+        try:
             futures = {executor.submit(_check_path, base_url, w): w for w in words}
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     hits.append(result)
                 bar.update()
-        bar.finish(f"Directory brute force complete - {len(hits)} found")
+            bar.finish(f"Directory brute force complete - {len(hits)} found")
+        except KeyboardInterrupt:
+            interrupted = True
+            bar.finish(f"Interrupted - {len(hits)} found so far")
+            print("[!] Directory enumeration interrupted by user.")
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     hits.sort(key=lambda h: h["path"])
 
@@ -107,4 +115,6 @@ def enumerate_dirs(target, scheme="http", port=None, wordlist_path=None,
             report.add_finding("Directory Enumeration", f"Found: /{hit['path']}",
                                 detail, severity, vuln_id=vuln_id)
 
+    if interrupted:
+        raise KeyboardInterrupt
     return hits, base_url

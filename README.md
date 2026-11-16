@@ -63,9 +63,14 @@ restart, no reinstall.
 ## Features
 
 - Purple ASCII cat banner on every launch
+- Flexible target input — paste an IP, a hostname, or a full URL
+  (`https://host:port/path?query`) anywhere you're asked for a target;
+  scheme, port, and path are parsed out automatically
 - Live purple progress bars with percentage for every long-running task
   (port scanning, directory/subdomain brute-forcing, WordPress plugin/
   theme checks, XSS parameter testing, login brute force)
+- Press Ctrl+C to stop any running task early — shows whatever was found
+  so far and returns to the menu instead of crashing the whole program
 - One-time setup, persistent virtual environment, instant reusable launch
 - Interactive menu that stays open across scans
 - Port scanning with `nmap` (service/version detection) when available,

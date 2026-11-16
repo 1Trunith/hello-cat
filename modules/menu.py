@@ -68,6 +68,7 @@ class SessionState:
         self.domain = None
         self.scheme = "http"
         self.http_port = None
+        self.suggested_path = ""
         self.threads = 100
         self.verbose = False
         self.skip_authtest = False
@@ -88,18 +89,25 @@ def show_menu(state):
 def prompt_target(state):
     default_hint = f" [{state.target}]" if state.target else ""
     try:
-        entered = input(f"Enter target IP or hostname{default_hint}: ").strip()
-    except EOFError:
+        entered = input(f"Enter target (IP, hostname, or full URL){default_hint}: ").strip()
+    except (EOFError, KeyboardInterrupt):
         entered = ""
     if not entered and state.target:
         return state.target
     if not entered:
         return None
+
+    parsed = netutils.parse_target_input(entered)
     try:
-        return netutils.resolve_target(entered)
+        resolved = netutils.resolve_target(parsed["host"])
     except socket.gaierror:
-        print(f"[!] Could not resolve '{entered}'.")
+        print(f"[!] Could not resolve '{parsed['host']}'.")
         return None
+
+    state.scheme = parsed["scheme"]
+    state.http_port = parsed["port"]
+    state.suggested_path = parsed["path"]
+    return resolved
 
 
 def pause():
@@ -139,41 +147,45 @@ def run_full_scan(state):
     state.target = target
 
     report = ReconReport(target=target, domain=state.domain)
+    open_ports, dir_hits = [], []
 
-    print(f"\n[*] Starting port scan ({'nmap' if port_scanner.nmap_available() else 'python fallback'})...")
-    open_ports, scan_method = port_scanner.scan(target, threads=state.threads, report=report)
-    print(f"[+] Port scan complete via {scan_method}: {len(open_ports)} open port(s) found.")
-    state.last_open_ports = open_ports
+    try:
+        print(f"\n[*] Starting port scan ({'nmap' if port_scanner.nmap_available() else 'python fallback'})...")
+        open_ports, scan_method = port_scanner.scan(target, threads=state.threads, report=report)
+        print(f"[+] Port scan complete via {scan_method}: {len(open_ports)} open port(s) found.")
+        state.last_open_ports = open_ports
 
-    http_port, scheme = determine_http_port(open_ports, state)
-    state.http_port, state.scheme = http_port, scheme
-    base_url = f"{scheme}://{target}"
-    if http_port and http_port not in (80, 443):
-        base_url += f":{http_port}"
+        http_port, scheme = determine_http_port(open_ports, state)
+        state.http_port, state.scheme = http_port, scheme
+        base_url = f"{scheme}://{target}"
+        if http_port and http_port not in (80, 443):
+            base_url += f":{http_port}"
 
-    dns_result = dns_tls.run(target, open_ports, report=report)
-    auto_detect_domain(state, dns_result.get("hostname"))
+        dns_result = dns_tls.run(target, open_ports, report=report)
+        auto_detect_domain(state, dns_result.get("hostname"))
 
-    print(f"\n[*] Running directory/file enumeration on {base_url}...")
-    dir_hits, base_url = dir_enum.enumerate_dirs(target, scheme=scheme, port=http_port,
-                                                  threads=state.threads, report=report)
-    print(f"[+] Directory enumeration complete: {len(dir_hits)} interesting path(s) found.")
-    state.last_dir_hits = dir_hits
+        print(f"\n[*] Running directory/file enumeration on {base_url}...")
+        dir_hits, base_url = dir_enum.enumerate_dirs(target, scheme=scheme, port=http_port,
+                                                      threads=state.threads, report=report)
+        print(f"[+] Directory enumeration complete: {len(dir_hits)} interesting path(s) found.")
+        state.last_dir_hits = dir_hits
 
-    print(f"\n[*] Running technology fingerprinting on {base_url}...")
-    technologies, _ = tech_fingerprint.fingerprint(target, scheme=scheme, port=http_port, report=report)
-    print(f"[+] Fingerprinting complete: {len(technologies)} signature(s) found.")
+        print(f"\n[*] Running technology fingerprinting on {base_url}...")
+        technologies, _ = tech_fingerprint.fingerprint(target, scheme=scheme, port=http_port, report=report)
+        print(f"[+] Fingerprinting complete: {len(technologies)} signature(s) found.")
 
-    print("\n[*] Running subdomain enumeration...")
-    subdomains, _ = subdomain_enum.enumerate_subdomains(domain=state.domain, threads=state.threads, report=report)
-    print(f"[+] Subdomain enumeration complete: {len(subdomains)} subdomain(s) resolved.")
+        print("\n[*] Running subdomain enumeration...")
+        subdomains, _ = subdomain_enum.enumerate_subdomains(domain=state.domain, threads=state.threads, report=report)
+        print(f"[+] Subdomain enumeration complete: {len(subdomains)} subdomain(s) resolved.")
 
-    print("\n[*] Running common vulnerability checks...")
-    vuln_check.run_checks(target, base_url, open_ports, dir_hits, report=report)
-    print("[+] Vulnerability checks complete.")
+        print("\n[*] Running common vulnerability checks...")
+        vuln_check.run_checks(target, base_url, open_ports, dir_hits, report=report)
+        print("[+] Vulnerability checks complete.")
 
-    print("\n[*] Checking for WordPress...")
-    wordpress_enum.enumerate(target, scheme=scheme, port=http_port, threads=state.threads, report=report)
+        print("\n[*] Checking for WordPress...")
+        wordpress_enum.enumerate(target, scheme=scheme, port=http_port, threads=state.threads, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] Scan interrupted by user - showing results gathered so far.")
 
     state.last_report = report
     path = history.save_scan(report)
@@ -198,9 +210,12 @@ def run_wordpress_enum(state):
         return
     state.target = target
     report = ReconReport(target=target, domain=state.domain)
-    print(f"\n[*] Running WordPress enumeration against {target}...")
-    wordpress_enum.enumerate(target, scheme=state.scheme, port=state.http_port,
-                              threads=state.threads, report=report)
+    try:
+        print(f"\n[*] Running WordPress enumeration against {target}...")
+        wordpress_enum.enumerate(target, scheme=state.scheme, port=state.http_port,
+                                  threads=state.threads, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] WordPress enumeration interrupted by user - showing results gathered so far.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     pause()
@@ -213,10 +228,13 @@ def run_web_app_analysis(state):
         return
     state.target = target
     report = ReconReport(target=target, domain=state.domain)
-    print(f"\n[*] Running web application analysis against {target}...")
-    auth_analysis.run_analysis(target, scheme=state.scheme, port=state.http_port,
-                                dir_hits=state.last_dir_hits, report=report,
-                                skip_authtest=state.skip_authtest)
+    try:
+        print(f"\n[*] Running web application analysis against {target}...")
+        auth_analysis.run_analysis(target, scheme=state.scheme, port=state.http_port,
+                                    dir_hits=state.last_dir_hits, report=report,
+                                    skip_authtest=state.skip_authtest)
+    except KeyboardInterrupt:
+        print("\n[!] Web application analysis interrupted by user - showing results gathered so far.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     pause()
@@ -229,15 +247,18 @@ def run_dns_discovery(state):
         return
     state.target = target
     report = ReconReport(target=target, domain=state.domain)
-    open_ports = state.last_open_ports
-    if not open_ports:
-        print(f"\n[*] No prior port scan for {target}, scanning now...")
-        open_ports, _ = port_scanner.scan(target, threads=state.threads, report=report)
-        state.last_open_ports = open_ports
-    dns_result = dns_tls.run(target, open_ports, report=report)
-    auto_detect_domain(state, dns_result.get("hostname"))
-    if state.domain:
-        subdomain_enum.enumerate_subdomains(domain=state.domain, threads=state.threads, report=report)
+    try:
+        open_ports = state.last_open_ports
+        if not open_ports:
+            print(f"\n[*] No prior port scan for {target}, scanning now...")
+            open_ports, _ = port_scanner.scan(target, threads=state.threads, report=report)
+            state.last_open_ports = open_ports
+        dns_result = dns_tls.run(target, open_ports, report=report)
+        auto_detect_domain(state, dns_result.get("hostname"))
+        if state.domain:
+            subdomain_enum.enumerate_subdomains(domain=state.domain, threads=state.threads, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] DNS discovery interrupted by user - showing results gathered so far.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     pause()
@@ -253,9 +274,12 @@ def run_xss_module(state):
         return
     state.target = target
     report = ReconReport(target=target, domain=state.domain)
-    print(f"\n[*] Running XSS exploitation module against {target}...")
-    xss_module.run(target, scheme=state.scheme, port=state.http_port,
-                    dir_hits=state.last_dir_hits, report=report)
+    try:
+        print(f"\n[*] Running XSS exploitation module against {target}...")
+        xss_module.run(target, scheme=state.scheme, port=state.http_port,
+                        dir_hits=state.last_dir_hits, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] XSS module interrupted by user - showing results gathered so far.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     pause()
@@ -336,6 +360,7 @@ def auth_brute_force(state):
     password = None if passlist else prompt_path("Password")
 
     report = ReconReport(target=target)
+    result = None
     try:
         result = bruteforce.brute_force(service, target, port=int(port) if port else None,
                                          userlist=userlist, username=username,
@@ -344,6 +369,8 @@ def auth_brute_force(state):
         print(f"[!] {exc}")
         pause()
         return
+    except KeyboardInterrupt:
+        print("\n[!] Brute force interrupted by user - no result captured from the engine.")
 
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
@@ -363,7 +390,8 @@ def auth_brute_force_http(state):
     base_url = f"{state.scheme}://{target}"
     if state.http_port and state.http_port not in (80, 443):
         base_url += f":{state.http_port}"
-    login_url = prompt_path(f"Login page URL (full path, query string, etc. all fine) [{base_url}]") or base_url
+    default_url = base_url + state.suggested_path
+    login_url = prompt_path(f"Login page URL (full path, query string, etc. all fine) [{default_url}]") or default_url
     userlist = prompt_path("Path to username wordlist (blank = auto-detect: WordPress users, "
                             "then SecLists, then bundled list)")
     passlist = prompt_path("Path to password wordlist (blank = auto-detect rockyou.txt, "
@@ -399,7 +427,11 @@ def auth_password_spray(state):
         return
 
     report = ReconReport(target=target)
-    result = bruteforce.password_spray(service, target, userlist, password, report=report)
+    result = None
+    try:
+        result = bruteforce.password_spray(service, target, userlist, password, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] Password spray interrupted by user - no result captured from the engine.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     if result:
@@ -420,7 +452,11 @@ def auth_default_creds(state):
         return
 
     report = ReconReport(target=target)
-    result = bruteforce.check_default_service_credentials(service, target, report=report)
+    result = None
+    try:
+        result = bruteforce.check_default_service_credentials(service, target, report=report)
+    except KeyboardInterrupt:
+        print("\n[!] Default credential check interrupted by user - no result captured from the engine.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
     if result:
@@ -436,7 +472,8 @@ def auth_validate_single(state):
     base_url = f"{state.scheme}://{target}"
     if state.http_port and state.http_port not in (80, 443):
         base_url += f":{state.http_port}"
-    login_url = prompt_path(f"Login page URL [{base_url}]") or base_url
+    default_url = base_url + state.suggested_path
+    login_url = prompt_path(f"Login page URL [{default_url}]") or default_url
     username = prompt_path("Username")
     password = prompt_path("Password") or ""
 
@@ -592,13 +629,18 @@ def run_auth_menu(state):
             choice = input("  Enter Option: ").strip()
         except EOFError:
             choice = "0"
+        except KeyboardInterrupt:
+            continue
 
         if choice == "0":
             return
 
         handler = AUTH_HANDLERS.get(choice)
         if handler:
-            handler(state)
+            try:
+                handler(state)
+            except KeyboardInterrupt:
+                print("\n[!] Task interrupted by user - returning to menu.")
         else:
             print("[!] Invalid option.")
             pause()
@@ -606,16 +648,20 @@ def run_auth_menu(state):
 
 def change_target(state):
     try:
-        new_target = input("Enter new target IP or hostname: ").strip()
-    except EOFError:
+        new_target = input("Enter new target (IP, hostname, or full URL): ").strip()
+    except (EOFError, KeyboardInterrupt):
         new_target = ""
     if new_target:
+        parsed = netutils.parse_target_input(new_target)
         try:
-            state.target = netutils.resolve_target(new_target)
+            state.target = netutils.resolve_target(parsed["host"])
         except socket.gaierror:
-            print(f"[!] Could not resolve '{new_target}'.")
+            print(f"[!] Could not resolve '{parsed['host']}'.")
             pause()
             return
+        state.scheme = parsed["scheme"]
+        state.http_port = parsed["port"]
+        state.suggested_path = parsed["path"]
     try:
         new_domain = input("Enter domain for subdomain enumeration (blank to leave unset): ").strip()
     except EOFError:
@@ -646,6 +692,8 @@ def run_menu_loop(state):
             choice = input("  Enter Option: ").strip()
         except EOFError:
             choice = "99"
+        except KeyboardInterrupt:
+            continue
 
         if choice == "0":
             continue
@@ -655,7 +703,10 @@ def run_menu_loop(state):
 
         handler = HANDLERS.get(choice)
         if handler:
-            handler(state)
+            try:
+                handler(state)
+            except KeyboardInterrupt:
+                print("\n[!] Task interrupted by user - returning to menu.")
         else:
             print("[!] Invalid option.")
             pause()

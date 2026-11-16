@@ -70,17 +70,22 @@ def get_version(base_url, homepage_resp):
 def enumerate_plugins_themes(base_url, threads=1):
     found_plugins, found_themes = [], []
     bar = ProgressBar(total=len(COMMON_PLUGINS) + len(COMMON_THEMES), label="Checking plugins/themes")
-    for slug in COMMON_PLUGINS:
-        resp = _get(f"{base_url}/wp-content/plugins/{slug}/")
-        if resp and resp.status_code in (200, 403):
-            found_plugins.append(slug)
-        bar.update()
-    for slug in COMMON_THEMES:
-        resp = _get(f"{base_url}/wp-content/themes/{slug}/")
-        if resp and resp.status_code in (200, 403):
-            found_themes.append(slug)
-        bar.update()
-    bar.finish(f"{len(found_plugins)} plugin(s), {len(found_themes)} theme(s) found")
+    try:
+        for slug in COMMON_PLUGINS:
+            resp = _get(f"{base_url}/wp-content/plugins/{slug}/")
+            if resp and resp.status_code in (200, 403):
+                found_plugins.append(slug)
+            bar.update()
+        for slug in COMMON_THEMES:
+            resp = _get(f"{base_url}/wp-content/themes/{slug}/")
+            if resp and resp.status_code in (200, 403):
+                found_themes.append(slug)
+            bar.update()
+        bar.finish(f"{len(found_plugins)} plugin(s), {len(found_themes)} theme(s) found")
+    except KeyboardInterrupt:
+        bar.finish(f"Interrupted - {len(found_plugins)} plugin(s), {len(found_themes)} theme(s) found so far")
+        print("[!] Plugin/theme check interrupted by user.")
+        raise
     return found_plugins, found_themes
 
 

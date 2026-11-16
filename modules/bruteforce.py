@@ -24,10 +24,20 @@ def which_engine(preferred=None):
 
 
 def _run(cmd, timeout=600):
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return result.stdout + result.stderr
-    except (subprocess.TimeoutExpired, OSError) as exc:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return stdout + stderr
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        return "timed out"
+    except KeyboardInterrupt:
+        process.kill()
+        process.communicate()
+        print("[!] Brute force engine interrupted by user.")
+        raise
+    except OSError as exc:
         return str(exc)
 
 

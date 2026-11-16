@@ -46,6 +46,20 @@ def john_available():
     return shutil.which("john") is not None
 
 
+def _run_killable(cmd, timeout):
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+    except KeyboardInterrupt:
+        process.kill()
+        process.communicate()
+        print("[!] Cracking process interrupted by user.")
+        raise
+
+
 def run_hashcat(hash_file, wordlist, mode, extra_args=None, timeout=1800):
     if not hashcat_available():
         return None
@@ -53,8 +67,8 @@ def run_hashcat(hash_file, wordlist, mode, extra_args=None, timeout=1800):
     if extra_args:
         cmd += extra_args
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError):
+        _run_killable(cmd, timeout)
+    except OSError:
         return None
     try:
         with open(f"{hash_file}.cracked", "r", encoding="utf-8", errors="ignore") as fh:
@@ -74,7 +88,7 @@ def run_john(hash_file, wordlist=None, format_name=None, timeout=1800):
         cmd.append(f"--format={format_name}")
     cmd.append(hash_file)
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        _run_killable(cmd, timeout)
         result = subprocess.run(["john", "--show", hash_file], capture_output=True, text=True, timeout=60)
         return result.stdout
     except (subprocess.TimeoutExpired, OSError):

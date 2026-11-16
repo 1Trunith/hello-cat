@@ -37,15 +37,23 @@ def enumerate_subdomains(domain=None, wordlist_path=None, threads=50, report=Non
     words = _load_words(wordlist_file)
 
     found = []
+    interrupted = False
     bar = ProgressBar(total=len(words), label="Brute-forcing subdomains")
-    with ThreadPoolExecutor(max_workers=threads) as executor:
+    executor = ThreadPoolExecutor(max_workers=threads)
+    try:
         futures = {executor.submit(_resolve, w, domain): w for w in words}
         for future in as_completed(futures):
             result = future.result()
             if result:
                 found.append(result)
             bar.update()
-    bar.finish(f"Subdomain brute force complete - {len(found)} found")
+        bar.finish(f"Subdomain brute force complete - {len(found)} found")
+    except KeyboardInterrupt:
+        interrupted = True
+        bar.finish(f"Interrupted - {len(found)} found so far")
+        print("[!] Subdomain enumeration interrupted by user.")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     found.sort(key=lambda r: r["subdomain"])
 
@@ -59,4 +67,6 @@ def enumerate_subdomains(domain=None, wordlist_path=None, threads=50, report=Non
             report.add_finding("Subdomain Enumeration", f"Resolved: {f['subdomain']}",
                                 f"-> {f['ip']}", "INFO")
 
+    if interrupted:
+        raise KeyboardInterrupt
     return found, wordlist_file

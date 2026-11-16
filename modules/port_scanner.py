@@ -123,11 +123,18 @@ def _scan_single_port(target, port, timeout=1.0):
         return None
 
 
+class ScanInterrupted(Exception):
+    def __init__(self, partial):
+        super().__init__()
+        self.partial = partial
+
+
 def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
     results = []
     port_list = _expand_ports(ports)
     bar = ProgressBar(total=len(port_list), label="Scanning ports")
-    with ThreadPoolExecutor(max_workers=threads) as executor:
+    executor = ThreadPoolExecutor(max_workers=threads)
+    try:
         futures = {
             executor.submit(_scan_single_port, target, port, timeout): port
             for port in port_list
@@ -137,13 +144,20 @@ def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
             if res:
                 results.append(res)
             bar.update()
-    bar.finish(f"Port scan complete - {len(results)} open")
+        bar.finish(f"Port scan complete - {len(results)} open")
+    except KeyboardInterrupt:
+        bar.finish(f"Interrupted - {len(results)} open so far")
+        print("[!] Port scan interrupted by user.")
+        raise ScanInterrupted(sorted(results, key=lambda r: r["port"]))
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return sorted(results, key=lambda r: r["port"])
 
 
 def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
     open_ports = None
     method = "python-socket"
+    interrupted = False
     if nmap_available():
         open_ports = run_nmap_scan(target, ports=ports)
         method = "nmap"
@@ -155,7 +169,11 @@ def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
             method = "python-socket"
 
     if open_ports is None:
-        open_ports = run_python_scan(target, ports=ports, threads=threads)
+        try:
+            open_ports = run_python_scan(target, ports=ports, threads=threads)
+        except ScanInterrupted as e:
+            open_ports = e.partial
+            interrupted = True
 
     if report:
         report.set_section("port_scan", {"method": method, "open_ports": open_ports})
@@ -175,4 +193,6 @@ def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
                     break
             report.add_finding("Port Scan", f"Open port {p['port']}/{p['protocol']}",
                                 detail, severity, vuln_id=vuln_id)
+    if interrupted:
+        raise KeyboardInterrupt
     return open_ports, method

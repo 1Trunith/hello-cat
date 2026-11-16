@@ -87,45 +87,50 @@ def scan_reflected(target_url, report=None):
     params_to_test = sorted(set(existing_params + COMMON_PARAMS))
 
     bar = ProgressBar(total=len(params_to_test), label=f"Testing reflected XSS on {target_url}")
-    for param in params_to_test:
-        bar.update()
-        token = _token()
-        for payload, category in payload_templates(token):
-            marker = f"xsscat{token}"
-            test_url = build_test_url(target_url, param, payload)
-            resp = _get(test_url)
-            if not resp or not resp.text:
-                continue
-            if payload in resp.text:
-                context = classify_reflection_context(resp.text, payload)
-                severity = "CRITICAL" if context in ("html_body", "html_attribute") else "HIGH"
-                finding = {
-                    "type": "reflected", "url": test_url, "param": param,
-                    "payload": payload, "bypass_category": category, "context": context,
-                }
-                findings.append(finding)
-                if report:
-                    report.add_finding(
-                        "XSS Exploitation",
-                        f"Reflected XSS confirmed in parameter '{param}' ({category})",
-                        f"URL: {test_url} | Payload: {payload} | Reflection context: {context}",
-                        severity, vuln_id="xss_reflected",
-                    )
-                break
-            elif marker in resp.text:
-                findings.append({
-                    "type": "reflected_partial", "url": test_url, "param": param,
-                    "payload": payload, "bypass_category": category,
-                })
-                if report:
-                    report.add_finding(
-                        "XSS Exploitation",
-                        f"Partial XSS reflection (filtered) in parameter '{param}'",
-                        f"URL: {test_url} | Payload: {payload} | Marker reflected but payload "
-                        "appears to have been partially sanitized - try additional bypass variants manually",
-                        "MEDIUM",
-                    )
-    bar.finish(f"{len([f for f in findings if f['type'] == 'reflected'])} reflected XSS finding(s)")
+    try:
+        for param in params_to_test:
+            bar.update()
+            token = _token()
+            for payload, category in payload_templates(token):
+                marker = f"xsscat{token}"
+                test_url = build_test_url(target_url, param, payload)
+                resp = _get(test_url)
+                if not resp or not resp.text:
+                    continue
+                if payload in resp.text:
+                    context = classify_reflection_context(resp.text, payload)
+                    severity = "CRITICAL" if context in ("html_body", "html_attribute") else "HIGH"
+                    finding = {
+                        "type": "reflected", "url": test_url, "param": param,
+                        "payload": payload, "bypass_category": category, "context": context,
+                    }
+                    findings.append(finding)
+                    if report:
+                        report.add_finding(
+                            "XSS Exploitation",
+                            f"Reflected XSS confirmed in parameter '{param}' ({category})",
+                            f"URL: {test_url} | Payload: {payload} | Reflection context: {context}",
+                            severity, vuln_id="xss_reflected",
+                        )
+                    break
+                elif marker in resp.text:
+                    findings.append({
+                        "type": "reflected_partial", "url": test_url, "param": param,
+                        "payload": payload, "bypass_category": category,
+                    })
+                    if report:
+                        report.add_finding(
+                            "XSS Exploitation",
+                            f"Partial XSS reflection (filtered) in parameter '{param}'",
+                            f"URL: {test_url} | Payload: {payload} | Marker reflected but payload "
+                            "appears to have been partially sanitized - try additional bypass variants manually",
+                            "MEDIUM",
+                        )
+        bar.finish(f"{len([f for f in findings if f['type'] == 'reflected'])} reflected XSS finding(s)")
+    except KeyboardInterrupt:
+        bar.finish(f"Interrupted - {len(findings)} finding(s) so far")
+        print("[!] Reflected XSS scan interrupted by user.")
+        raise
     if not findings and report:
         report.add_finding("XSS Exploitation", "No reflected XSS found in tested parameters",
                             f"Tested parameters: {', '.join(params_to_test)} on {target_url}", "INFO")
@@ -159,43 +164,47 @@ def discover_forms(page_url):
 def scan_stored(page_url, report=None):
     findings = []
     forms = discover_forms(page_url)
-    for form in forms:
-        text_fields = [name for name, val in form["fields"].items() if val is None]
-        if not text_fields:
-            continue
-        token = _token()
-        marker = f"xsscat{token}"
-        payload = f"<script>alert('{marker}')</script>"
-
-        submission = {name: (form["fields"][name] or "") for name in form["fields"]}
-        for field in text_fields:
-            submission[field] = payload
-
-        try:
-            if form["method"] == "post":
-                requests.post(form["action"], data=submission, timeout=8, verify=False)
-            else:
-                requests.get(form["action"], params=submission, timeout=8, verify=False)
-        except requests.RequestException:
-            continue
-
-        for check_url in (page_url, form["action"]):
-            resp = _get(check_url)
-            if not resp or not resp.text:
+    try:
+        for form in forms:
+            text_fields = [name for name, val in form["fields"].items() if val is None]
+            if not text_fields:
                 continue
-            if payload in resp.text:
-                context = classify_reflection_context(resp.text, payload)
-                findings.append({"type": "stored", "url": check_url, "form_action": form["action"],
-                                  "payload": payload, "context": context})
-                if report:
-                    report.add_finding(
-                        "XSS Exploitation",
-                        f"Stored XSS confirmed via form at {form['action']}",
-                        f"Submitted to: {form['action']} | Rendered unescaped at: {check_url} | "
-                        f"Payload: {payload} | Context: {context}",
-                        "CRITICAL", vuln_id="xss_stored",
-                    )
-                break
+            token = _token()
+            marker = f"xsscat{token}"
+            payload = f"<script>alert('{marker}')</script>"
+
+            submission = {name: (form["fields"][name] or "") for name in form["fields"]}
+            for field in text_fields:
+                submission[field] = payload
+
+            try:
+                if form["method"] == "post":
+                    requests.post(form["action"], data=submission, timeout=8, verify=False)
+                else:
+                    requests.get(form["action"], params=submission, timeout=8, verify=False)
+            except requests.RequestException:
+                continue
+
+            for check_url in (page_url, form["action"]):
+                resp = _get(check_url)
+                if not resp or not resp.text:
+                    continue
+                if payload in resp.text:
+                    context = classify_reflection_context(resp.text, payload)
+                    findings.append({"type": "stored", "url": check_url, "form_action": form["action"],
+                                      "payload": payload, "context": context})
+                    if report:
+                        report.add_finding(
+                            "XSS Exploitation",
+                            f"Stored XSS confirmed via form at {form['action']}",
+                            f"Submitted to: {form['action']} | Rendered unescaped at: {check_url} | "
+                            f"Payload: {payload} | Context: {context}",
+                            "CRITICAL", vuln_id="xss_stored",
+                        )
+                    break
+    except KeyboardInterrupt:
+        print(f"[!] Stored XSS scan interrupted by user - {len(findings)} finding(s) so far.")
+        raise
 
     if not findings and report and forms:
         report.add_finding("XSS Exploitation", "No stored XSS found in discovered forms",

@@ -14,7 +14,8 @@ def parse_args():
         description="Hello Cat - automated TryHackMe/CTF reconnaissance tool",
     )
     parser.add_argument("target", nargs="?", default=None,
-                         help="Target IP address (or hostname). Omit to launch the interactive menu.")
+                         help="Target IP, hostname, or full URL (scheme/port parsed automatically). "
+                              "Omit to launch the interactive menu.")
     parser.add_argument("--domain", help="Domain name to use for subdomain brute-forcing")
     parser.add_argument("--ports", default=port_scanner.DEFAULT_PORTS,
                          help="Port range/list for scanning")
@@ -40,11 +41,17 @@ def parse_args():
 def run_cli(args):
     banner.print_banner()
 
+    parsed = netutils.parse_target_input(args.target)
     try:
-        target_ip = netutils.resolve_target(args.target)
+        target_ip = netutils.resolve_target(parsed["host"])
     except Exception:
-        print(f"[!] Could not resolve target '{args.target}'. Exiting.")
+        print(f"[!] Could not resolve target '{parsed['host']}'. Exiting.")
         sys.exit(1)
+
+    if parsed["port"] and not args.http_port:
+        args.http_port = parsed["port"]
+    if parsed["scheme"] and args.scheme == "http":
+        args.scheme = parsed["scheme"]
 
     print(f"[*] Target resolved to: {target_ip}")
     if args.domain:
