@@ -24,18 +24,24 @@ def nmap_available():
     return shutil.which("nmap") is not None
 
 
-def run_nmap_scan(target, ports=DEFAULT_PORTS, timing="-T4"):
+def run_nmap_scan(target, ports=DEFAULT_PORTS, timing="-T4", timeout=300):
     with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
         xml_path = tmp.name
     try:
         cmd = [
             "nmap", "-sV", "-Pn", timing,
+            "--host-timeout", f"{max(timeout - 20, 30)}s",
             "-p", ports,
             "-oX", xml_path,
             target,
         ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        check=False, timeout=600)
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            check=False, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        except OSError:
+            return None
         return _parse_nmap_xml(xml_path)
     finally:
         try:
@@ -131,13 +137,20 @@ def run_python_scan(target, ports=DEFAULT_PORTS, threads=100, timeout=1.0):
 
 
 def scan(target, ports=DEFAULT_PORTS, threads=100, report=None):
-    use_nmap = nmap_available()
-    if use_nmap:
+    open_ports = None
+    method = "python-socket"
+    if nmap_available():
         open_ports = run_nmap_scan(target, ports=ports)
         method = "nmap"
-    else:
+        if open_ports is None:
+            if report:
+                report.add_finding("Port Scan", "nmap scan timed out or failed, falling back to Python scanner",
+                                    f"target: {target}", "INFO")
+            open_ports = None
+            method = "python-socket"
+
+    if open_ports is None:
         open_ports = run_python_scan(target, ports=ports, threads=threads)
-        method = "python-socket"
 
     if report:
         report.set_section("port_scan", {"method": method, "open_ports": open_ports})
