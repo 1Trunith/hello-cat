@@ -5,7 +5,7 @@ from modules import (
     banner, port_scanner, dir_enum, subdomain_enum, tech_fingerprint,
     vuln_check, wordpress_enum, auth_analysis, dns_tls, history, netutils,
     bruteforce, hash_tools, wordlist_tools, token_analysis, log_analysis,
-    xss_module,
+    xss_module, pentest_assistant,
 )
 from modules.report import ReconReport
 from modules.main_utils import clear_screen
@@ -32,6 +32,7 @@ MENU_TEXT = """{bold}{cyan}  MAIN MENU{reset}
   {green}[7]{reset} Change Target IP / Domain
   {green}[8]{reset} Authentication & Credential Testing
   {green}[9]{reset} XSS Exploitation Module
+  {green}[10]{reset} Pentesting Assistant (Natural Language)
   {yellow}[0]{reset} Clear Terminal
   {yellow}[99]{reset} Exit
 
@@ -282,6 +283,48 @@ def run_xss_module(state):
         print("\n[!] XSS module interrupted by user - showing results gathered so far.")
     report.print_console(verbose=state.verbose)
     history.save_scan(report)
+    pause()
+
+
+def run_pentest_assistant(state):
+    target = prompt_target(state)
+    if not target:
+        print("[!] No target provided.")
+        return
+    state.target = target
+
+    print(f"\n  Target: {target}")
+    print("  Tell me what you want done, e.g. \"Can you assess this website for me?\" "
+          "or \"Could you breach this website for me?\"")
+    try:
+        request_text = input("  Request: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        request_text = ""
+    if not request_text:
+        print("[!] No request text provided.")
+        pause()
+        return
+
+    intent = pentest_assistant.classify_intent(request_text)
+
+    if intent == "breach":
+        print(f"\n[*] Understood as a BREACH request - running recon, then attempting to "
+              f"gain access to {target}.")
+        report, footholds = pentest_assistant.run_breach(target, state, confirm_authorized)
+    else:
+        print(f"\n[*] Understood as an ASSESS request - running read-only recon and "
+              f"vulnerability analysis against {target}.")
+        report = pentest_assistant.run_assess(target, state)
+        footholds = []
+
+    state.last_report = report
+    path = history.save_scan(report)
+    report.print_console(verbose=state.verbose)
+    if footholds:
+        print(f"\n[+] {len(footholds)} credential/access finding(s):")
+        for f in footholds:
+            print(f"    - {f}")
+    print(f"\n[+] Scan saved to {path}")
     pause()
 
 
@@ -682,6 +725,7 @@ HANDLERS = {
     "7": change_target,
     "8": run_auth_menu,
     "9": run_xss_module,
+    "10": run_pentest_assistant,
 }
 
 
