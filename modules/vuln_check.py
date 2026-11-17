@@ -28,6 +28,28 @@ def check_anonymous_ftp(target, open_ports, report=None):
         pass
 
 
+def check_redis_unauth(target, open_ports, report=None):
+    if not any(p["port"] == 6379 for p in open_ports):
+        return
+    import socket
+    try:
+        sock = socket.create_connection((target, 6379), timeout=5)
+        sock.sendall(b"PING\r\n")
+        reply = sock.recv(64)
+        sock.close()
+        if reply.startswith(b"+PONG"):
+            if report:
+                report.add_finding(
+                    "Vulnerability Check", "Redis accessible without authentication",
+                    "PING on 6379 answered +PONG with no AUTH - full read/write access to the "
+                    "datastore (and potentially RCE via module load / cron-write primitives) is "
+                    "likely available: redis-cli -h " + target, "CRITICAL",
+                    vuln_id="redis_unauth",
+                )
+    except OSError:
+        pass
+
+
 def check_smb_signing(target, open_ports, report=None):
     if not any(p["port"] in (139, 445) for p in open_ports):
         return

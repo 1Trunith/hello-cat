@@ -1,16 +1,39 @@
 # Hello Cat 🐱
 
-Made By @.Trunith — an interactive TryHackMe/CTF reconnaissance and
-vulnerability analysis framework. One-time setup, then a persistent
-terminal menu drives port scanning, service detection, directory and
-subdomain enumeration, technology fingerprinting, WordPress enumeration,
-web application/authentication analysis, and deep vulnerability write-ups,
-all tied together with persistent scan history.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](#manual-installation)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey.svg)](#quick-start)
+[![Use](https://img.shields.io/badge/use-authorized%20testing%20only-critical.svg)](#disclaimer)
+
+**Made by [@.Trunith](https://github.com/1Trunith)** — an interactive
+TryHackMe/CTF reconnaissance, vulnerability analysis, and exploitation
+framework. One-time setup, then a persistent terminal menu drives port
+scanning, service detection, directory and subdomain enumeration,
+technology fingerprinting, WordPress enumeration, web application and
+authentication analysis, a natural-language pentesting assistant that
+chains recon straight into exploitation, and deep vulnerability
+write-ups — all tied together with persistent scan history.
 
 > ⚠️ **Authorized use only.** Only run Hello Cat against systems you own or
 > are explicitly authorized to test (e.g. TryHackMe machines, your own lab,
-> or a signed pentest engagement). Unauthorized scanning of systems you do
-> not have permission to test may be illegal in your jurisdiction.
+> or a signed pentest engagement). Unauthorized scanning or exploitation of
+> systems you do not have permission to test may be illegal in your
+> jurisdiction. See [Disclaimer](#disclaimer).
+
+## Contents
+
+- [Quick Start](#quick-start)
+- [Features](#features)
+- [Menu Options](#menu-options)
+- [Pentesting Assistant (Natural Language)](#10-pentesting-assistant-natural-language)
+- [Authentication & Credential Testing Submenu](#8-authentication--credential-testing-submenu)
+- [XSS Exploitation Module](#xss-exploitation-module-9)
+- [Non-Interactive / Scripted Usage](#non-interactive--scripted-usage)
+- [Deep Vulnerability Analysis](#deep-vulnerability-analysis)
+- [Manual Installation](#manual-installation)
+- [Project Structure](#project-structure)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Quick Start
 
@@ -50,6 +73,10 @@ Either launcher drops you into the interactive menu:
   [5] DNS & Hostname Discovery
   [6] View Previous Scan Results
   [7] Change Target IP / Domain
+  [8] Authentication & Credential Testing
+  [9] XSS Exploitation Module
+  [10] Pentesting Assistant (Natural Language)
+  [11] User Agreement / Disclaimer
   [0] Clear Terminal
   [99] Exit
 
@@ -92,11 +119,23 @@ restart, no reinstall.
   wordlist/username generation, credential extraction from text/logs, JWT/
   NTLM/OAuth/SAML token analysis, and an authentication log analyzer
 - Follow-up enumeration recommendations based on discovered services
+- Natural-language **Pentesting Assistant** (`[10]`) — describe what you
+  want in plain English ("assess this site" / "breach this box") and it
+  chains the entire recon pipeline into either a read-only assessment or
+  a full automated exploitation attempt, gated behind one authorization
+  prompt. See [Pentesting Assistant](#10-pentesting-assistant-natural-language)
+- A dozen dedicated exploitation modules used by breach mode: JWT
+  `alg=none`/weak-secret bypass, OAuth `redirect_uri` manipulation,
+  session fixation/hijacking, 2FA/MFA bypass, known-CVE matching, SQLi →
+  webshell, file-upload filter bypass → RCE, insecure deserialization,
+  SSRF against cloud metadata, XXE file disclosure, config/backup secret
+  extraction, and pass-the-hash against SMB
 - Deep vulnerability analysis: cause, impact, validation, step-by-step
   reproduction, tools, and remediation for every flagged issue
 - Persistent scan history under `scan_history/`, browsable from the menu
 - Severity-rated findings: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`
 - Optional JSON/text report export for non-interactive runs
+- Built-in user agreement/disclaimer (`[11]`), viewable at any time from the menu
 
 ## Menu Options
 
@@ -111,6 +150,8 @@ restart, no reinstall.
 | `[7]` Change Target IP / Domain | Update the active target/domain for subsequent menu actions |
 | `[8]` Authentication & Credential Testing | Submenu: brute force, hash cracking, wordlist/username tools, token analysis, log analysis |
 | `[9]` XSS Exploitation Module | Reflected, stored, and DOM-based XSS detection with filter-bypass payloads and impact demonstration |
+| `[10]` Pentesting Assistant (Natural Language) | Describe a goal in plain English; classifies it as assess (read-only) or breach (active) and runs the matching pipeline |
+| `[11]` User Agreement / Disclaimer | Prints the authorized-use disclaimer |
 | `[0]` Clear Terminal | Redraws the banner and menu |
 | `[99]` Exit | Quits the tool |
 
@@ -130,6 +171,57 @@ restart, no reinstall.
 
 Every live authentication-testing action requires typing `YES` to confirm
 you're authorized to test the target before it runs.
+
+## `[10]` Pentesting Assistant (Natural Language)
+
+A free-text front end over the rest of the tool, in `modules/pentest_assistant.py`.
+It adds no new attack capability of its own — it reads what you typed,
+classifies the intent, and calls the same recon/exploitation modules the
+dedicated menu options use, in a sensible order.
+
+1. **Prompts for a target**, then a plain-English request, e.g.
+   *"can you assess this website for me?"* or *"could you breach this
+   box for me?"*
+2. **Classifies intent** by keyword — `breach` (hack, exploit, pwn,
+   compromise, own this, attack, ...) vs. `assess` (audit, review, scan,
+   enumerate, investigate, ...). Defaults to the safer `assess` if
+   nothing matches.
+3. **Assess mode** runs the full read-only recon chain: port scan,
+   DNS/TLS, directory/subdomain enumeration, technology fingerprinting,
+   vulnerability checks, WordPress enumeration, web/auth analysis,
+   config/backup secret extraction, SSRF/XXE probing, OAuth/OIDC/SAML
+   discovery, and known-CVE matching against fingerprinted versions.
+4. **Breach mode** runs the same recon, then — after a single
+   `confirm_authorized()` prompt — attempts, in order: default/brute-force
+   credentials against discovered logins and open SSH/FTP/RDP; the XSS
+   module; JWT `alg=none`/weak-secret bypass; OAuth `redirect_uri`
+   manipulation; SQL injection escalated to a webshell drop; file-upload
+   filter bypass for RCE; insecure deserialization; session
+   fixation/hijacking; 2FA/MFA bypass; then retries any credentials it
+   confirmed against every other discovered service (credential reuse)
+   and, if SMB is open, attempts pass-the-hash with them.
+5. **Reports and saves** a severity-rated finding set the same way every
+   other scan does, listing any confirmed credential/access footholds.
+
+| New exploitation module | What it does |
+|---|---|
+| `jwt_exploit.py` | Strips the signature on `alg=none` tokens and replays a forged claim; tries a small built-in secret list against HMAC-signed tokens offline |
+| `oauth_exploit.py` | Tests whether a discovered OAuth/OIDC authorize endpoint validates `redirect_uri` strictly |
+| `session_exploit.py` | Harvests session identifiers leaked in URLs/logs/redirects, then replays one against likely authenticated endpoints |
+| `mfa_bypass.py` | Tests for missing OTP rate-limiting, brute-forceable backup codes, and replayable "remember this device" cookies |
+| `cve_match.py` / `cve_table.py` | Matches fingerprinted software/versions against a small curated CVE table, and against the full `searchsploit` index if installed — reports the exploit module/path, never auto-runs it |
+| `sqli_exploit.py` | Takes an error-based SQLi hit and escalates it: UNION-based extraction, then a heuristic MySQL `INTO OUTFILE`/MSSQL `xp_cmdshell` webshell drop |
+| `upload_exploit.py` | Tries common extension/content-type filter bypasses to land a minimal PHP webshell through a discovered upload form, then confirms execution |
+| `deserialize_exploit.py` | Detects Java/PHP/Python serialized-object signatures; sends a generated gadget chain via `ysoserial`/`phpggc` if installed |
+| `ssrf_exploit.py` | Probes URL-fetching parameters with cloud metadata (`169.254.169.254`) and internal targets |
+| `xxe_exploit.py` | Sends a classic external-entity payload to likely XML-parsing endpoints to read `/etc/passwd` / `win.ini` |
+| `config_extract.py` | Downloads exposed backup/config files (`.env`, `wp-config.php.bak`, `.git/config`, ...) already flagged by recon and parses out credentials |
+| `ntlm_pth.py` | Pass-the-hash/NTLM auth against SMB using confirmed credentials, via `impacket`'s `psexec.py`/`wmiexec.py`/`smbexec.py` if installed |
+
+Every module that has no installed external dependency (`searchsploit`,
+`ysoserial`, `phpggc`, `impacket`) still reports the finding and the exact
+manual command to run, the same fallback convention `bruteforce.py` uses
+for Hydra/Medusa/Ncrack.
 
 ## Authentication & Credential Testing — Feature Mapping
 
@@ -322,6 +414,20 @@ hello-cat/
 │   ├── log_analysis.py          # Authentication log analyzer
 │   ├── vuln_check.py          # Common vulnerability checks
 │   ├── vuln_database.py       # Deep-dive vulnerability knowledge base
+│   ├── pentest_assistant.py   # Natural-language assess/breach orchestrator
+│   ├── jwt_exploit.py         # JWT alg=none / weak-secret bypass
+│   ├── oauth_exploit.py       # OAuth/OIDC redirect_uri manipulation
+│   ├── session_exploit.py     # Session fixation/hijacking harvest + replay
+│   ├── mfa_bypass.py          # 2FA/MFA bypass vectors
+│   ├── cve_match.py            # Fingerprinted-version -> known-CVE matching
+│   ├── cve_table.py            # Bundled table of common THM-box CVEs
+│   ├── sqli_exploit.py        # SQL injection -> data extraction / webshell
+│   ├── upload_exploit.py      # File upload filter bypass -> RCE
+│   ├── deserialize_exploit.py # Insecure deserialization detection/exploitation
+│   ├── ssrf_exploit.py        # SSRF against cloud metadata / internal services
+│   ├── xxe_exploit.py          # XXE file disclosure
+│   ├── config_extract.py      # Exposed backup/config file secret extraction
+│   ├── ntlm_pth.py              # Pass-the-hash / NTLM auth against SMB
 │   ├── history.py              # Persistent scan history
 │   ├── report.py              # Severity-rated reporting + JSON/text export
 │   └── progress.py              # Purple terminal progress bars
@@ -337,10 +443,22 @@ hello-cat/
 
 ## Disclaimer
 
-This tool is provided for educational purposes and authorized security
-testing only (TryHackMe, CTFs, labs, and engagements you have explicit
-permission for). The authors are not responsible for any misuse. Always
-obtain proper authorization before scanning any system.
+This tool is provided for authorized security testing, CTF challenges
+(e.g. TryHackMe), and educational use only. The same text is available
+any time from the menu (`[11] User Agreement / Disclaimer`).
+
+Hello-Cat and [@.Trunith](https://github.com/1Trunith) are not
+responsible for any misuse of this tool. By using it you agree that:
+
+- You will only run scans, brute-force attempts, exploitation modules,
+  or any other feature of this tool against systems you own or are
+  explicitly authorized to test.
+- You assume full responsibility for how you use this tool and for any
+  consequences of that use, including legal consequences.
+- Hello-Cat / @.Trunith accept no liability for damage, data loss, legal
+  action, or any other outcome resulting from use or misuse of this tool.
+- Running this tool against systems you do not have permission to test
+  is illegal in most jurisdictions.
 
 ## License
 

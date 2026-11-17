@@ -11,14 +11,30 @@ SERVICE_MODULE_MAP = {
     "ftp": {"hydra": "ftp", "medusa": "ftp", "ncrack": "ftp"},
     "smb": {"hydra": "smb", "medusa": "smbnt", "ncrack": "smb"},
     "rdp": {"hydra": "rdp", "medusa": "rdp", "ncrack": "rdp"},
+    "mysql": {"hydra": "mysql", "medusa": "mysql"},
+    "postgres": {"hydra": "postgres", "medusa": "postgresql"},
+    "redis": {"hydra": "redis"},
+    "mongodb": {"hydra": "mongodb"},
+    "telnet": {"hydra": "telnet", "medusa": "telnet", "ncrack": "telnet"},
+    "vnc": {"hydra": "vnc", "medusa": "vnc", "ncrack": "vnc"},
+    "mssql": {"hydra": "mssql", "medusa": "mssql"},
 }
 
 
-def which_engine(preferred=None):
-    if preferred and shutil.which(preferred):
+def which_engine(service=None, preferred=None):
+    """Pick an installed brute-force engine that also supports `service`.
+
+    When `service` is omitted, any installed engine qualifies (legacy behavior).
+    """
+    supported = SERVICE_MODULE_MAP.get(service) if service else None
+
+    def _supports(engine):
+        return supported is None or engine in supported
+
+    if preferred and shutil.which(preferred) and _supports(preferred):
         return preferred
     for engine in ENGINES:
-        if shutil.which(engine):
+        if shutil.which(engine) and _supports(engine):
             return engine
     return None
 
@@ -47,15 +63,16 @@ def brute_force(service, target, port=None, userlist=None, password=None,
     if service not in SERVICE_MODULE_MAP:
         raise ValueError(f"Unsupported service: {service}")
 
-    chosen = which_engine(engine)
+    chosen = which_engine(service, engine)
     if not chosen:
         if report:
             report.add_finding(
                 "Authentication Testing",
-                f"{service.upper()} brute force skipped - no engine installed",
-                "Install hydra, medusa, or ncrack to enable this check "
-                f"(apt install hydra). Manual command: hydra -L <userlist> "
-                f"-P <passlist> {service}://{target}" + (f":{port}" if port else ""),
+                f"{service.upper()} brute force skipped - no supporting engine installed",
+                "Install hydra (widest protocol coverage: ssh, ftp, smb, rdp, mysql, "
+                "postgres, redis, mongodb, telnet, vnc, mssql), medusa, or ncrack. "
+                f"Manual command: hydra -L <userlist> -P <passlist> {service}://{target}"
+                + (f":{port}" if port else ""),
                 "INFO",
             )
         return None
@@ -135,15 +152,28 @@ def _parse_engine_output(engine, output):
 DEFAULT_SERVICE_USERNAMES = ["admin", "administrator", "root", "user", "guest", "test"]
 DEFAULT_SERVICE_PASSWORDS = ["admin", "password", "123456", "root", "toor", "changeme", ""]
 
+# Services with their own well-known default accounts get a tighter,
+# service-specific list instead of the generic OS-login set above.
+SERVICE_SPECIFIC_DEFAULTS = {
+    "mysql": (["root", "admin"], ["", "root", "password", "toor"]),
+    "postgres": (["postgres", "admin"], ["postgres", "password", "admin", ""]),
+    "redis": ([""], ["", "foobared", "redis", "password"]),
+    "mongodb": (["admin", "root"], ["", "admin", "password", "mongodb"]),
+    "mssql": (["sa", "admin"], ["", "sa", "Password123", "changeme"]),
+    "vnc": ([""], ["password", "vnc", "changeme", "admin"]),
+}
+
 
 def check_default_service_credentials(service, target, port=None, engine=None, report=None):
+    usernames, passwords = SERVICE_SPECIFIC_DEFAULTS.get(
+        service, (DEFAULT_SERVICE_USERNAMES, DEFAULT_SERVICE_PASSWORDS))
     userlist_path = passlist_path = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as uf:
-            uf.write("\n".join(DEFAULT_SERVICE_USERNAMES) + "\n")
+            uf.write("\n".join(usernames) + "\n")
             userlist_path = uf.name
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as pf:
-            pf.write("\n".join(DEFAULT_SERVICE_PASSWORDS) + "\n")
+            pf.write("\n".join(passwords) + "\n")
             passlist_path = pf.name
         return brute_force(service, target, port=port, userlist=userlist_path,
                             passlist=passlist_path, engine=engine, threads=2, report=report)
@@ -151,6 +181,28 @@ def check_default_service_credentials(service, target, port=None, engine=None, r
         for path in (userlist_path, passlist_path):
             if path and os.path.exists(path):
                 os.unlink(path)
+
+
+def try_single_credential(service, target, username, password, port=None, engine=None, report=None):
+    """Test one already-known username:password pair against a network
+    service - used for cross-service credential reuse (e.g. creds found
+    on FTP/a config file, retried against SSH)."""
+    result = brute_force(service, target, port=port, username=username,
+                          password=password, engine=engine, threads=1, report=None)
+    if report:
+        if result:
+            report.add_finding(
+                "Credential Reuse", f"Reused credentials work on {service.upper()}: {username}:{password}",
+                f"Confirmed against {target}" + (f":{port}" if port else ""),
+                "CRITICAL", vuln_id="credential_reuse_confirmed",
+            )
+        else:
+            report.add_finding(
+                "Credential Reuse", f"Credential reuse failed on {service.upper()}",
+                f"{username}:{password} did not work against {target}" + (f":{port}" if port else ""),
+                "INFO",
+            )
+    return result
 
 
 def password_spray(service, target, userlist, password, port=None, engine=None, report=None):
@@ -162,7 +214,7 @@ def detect_brute_force_protection(service, target, port=None, username="testuser
                                    wrong_password="definitely-wrong-password", attempts=5, report=None):
     import time
 
-    engine = which_engine()
+    engine = which_engine(service)
     if not engine:
         if report:
             report.add_finding("Authentication Testing", "Rate-limit/lockout test skipped",

@@ -196,7 +196,7 @@ def enumerate(target, scheme="http", port=None, threads=20, report=None):
             "INFO", vuln_id="default_creds_panel" if has_login_form else None,
         )
 
-    return {
+    result = {
         "detected": True,
         "base_url": base_url,
         "version": version,
@@ -205,3 +205,6 @@ def enumerate(target, scheme="http", port=None, threads=20, report=None):
         "users": users,
         "interesting_paths": hits,
     }
+    if report:
+        report.set_section("wordpress_enum", result)
+    return result

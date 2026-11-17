@@ -945,6 +945,337 @@ VULN_DB = {
                         "exposure.include), and never expose env/heapdump "
                         "publicly.",
     },
+    "jwt_alg_none_exploited": {
+        "title": "JWT alg=none Signature Bypass",
+        "cause": "The server accepts JWTs with 'alg' set to 'none' and "
+                  "does not verify a signature, so any client can craft "
+                  "a token with arbitrary claims.",
+        "impact": "An attacker can forge a token asserting any identity "
+                   "or privilege level (e.g. role=admin) without knowing "
+                   "any secret, leading to full authentication/"
+                   "authorization bypass.",
+        "validation": "Replay the forged token against a privileged "
+                       "endpoint and confirm the elevated response in a "
+                       "browser or with curl.",
+        "reproduction": [
+            "Decode the JWT header/payload (base64url)",
+            "Set alg to 'none', flip the privilege claim, re-encode",
+            "Send as Authorization: Bearer <token> with an empty signature segment",
+            "Confirm the server treats the request as the forged identity",
+        ],
+        "tools": ["jwt_tool", "curl", "Burp Suite"],
+        "remediation": "Explicitly allow-list accepted signing algorithms "
+                        "server-side and reject 'none' outright; never "
+                        "trust the alg claim from the token itself.",
+    },
+    "jwt_weak_secret_cracked": {
+        "title": "JWT Signed with a Weak/Guessable Secret",
+        "cause": "The token's HMAC signature validates against a common "
+                  "or default secret string.",
+        "impact": "Anyone who guesses the secret can forge arbitrarily "
+                   "privileged tokens, equivalent to a full auth bypass.",
+        "validation": "Forge a token with the cracked secret and confirm "
+                       "it's accepted by the server.",
+        "reproduction": [
+            "Extract the token's signing input (header.payload)",
+            "Brute-force/dictionary-attack the HMAC secret (hashcat -m 16500)",
+            "Re-sign a forged payload with the recovered secret",
+        ],
+        "tools": ["hashcat", "jwt_tool"],
+        "remediation": "Use a long, randomly generated signing secret "
+                        "(or asymmetric signing) and rotate it if "
+                        "compromised.",
+    },
+    "config_file_leaked": {
+        "title": "Exposed Configuration/Backup File with Credentials",
+        "cause": "A backup, editor swap, or environment file (.env, "
+                  "wp-config.php.bak, etc.) was left reachable over HTTP.",
+        "impact": "Database credentials, API keys, or application "
+                   "secrets in the file can be reused directly against "
+                   "the database or other services.",
+        "validation": "Download the file and confirm the extracted "
+                       "credentials authenticate successfully.",
+        "reproduction": [
+            "curl the exposed file path directly",
+            "Extract KEY=value / define() credential pairs",
+            "Test the credentials against the relevant service",
+        ],
+        "tools": ["curl"],
+        "remediation": "Remove backup/editor files from the web root, "
+                        "deny access to dotfiles, and rotate any "
+                        "credentials that were exposed.",
+    },
+    "ssrf_metadata_exposed": {
+        "title": "SSRF to Cloud Metadata Service",
+        "cause": "A URL-fetching parameter passes attacker input "
+                  "directly to a server-side HTTP request without "
+                  "restricting the destination host.",
+        "impact": "Reaching 169.254.169.254 (or equivalent) can expose "
+                   "cloud IAM credentials, enabling further compromise "
+                   "of the cloud account.",
+        "validation": "Confirm the metadata response is returned in the "
+                       "application's output.",
+        "reproduction": [
+            "Identify a URL/path/redirect parameter",
+            "Set it to http://169.254.169.254/latest/meta-data/",
+            "Check the response for metadata content",
+        ],
+        "tools": ["curl", "Burp Suite"],
+        "remediation": "Validate/allow-list destination hosts server-side, "
+                        "block requests to link-local/internal ranges, "
+                        "and use IMDSv2 with a hop limit on cloud instances.",
+    },
+    "ssrf_internal_suspected": {
+        "title": "Possible SSRF to Internal Services",
+        "cause": "Same root cause as cloud-metadata SSRF, but reaching "
+                  "an internal host/port instead of the metadata service.",
+        "impact": "Can be used to port-scan or interact with internal-"
+                   "only services (databases, admin panels) from the "
+                   "server's network position.",
+        "validation": "Confirm with an out-of-band listener (interactsh, "
+                       "Burp Collaborator) rather than timing alone.",
+        "reproduction": [
+            "Point the vulnerable parameter at 127.0.0.1:<port> or an "
+            "internal IP",
+            "Compare response/timing against a closed-port baseline",
+            "Confirm interaction with an out-of-band listener if possible",
+        ],
+        "tools": ["curl", "interactsh"],
+        "remediation": "Same as cloud-metadata SSRF: validate destination "
+                        "hosts, deny internal ranges by default.",
+    },
+    "xxe_file_disclosure": {
+        "title": "XML External Entity (XXE) File Disclosure",
+        "cause": "An XML parser processes a DOCTYPE with an external "
+                  "entity reference without disabling external entity "
+                  "resolution.",
+        "impact": "Allows reading arbitrary files readable by the "
+                   "application process (e.g. /etc/passwd, SSH keys, "
+                   "source code, cloud credentials).",
+        "validation": "Confirm the targeted file's contents are reflected "
+                       "in the response.",
+        "reproduction": [
+            "Submit a DOCTYPE with a SYSTEM file:// entity",
+            "Reference the entity in the document body",
+            "Confirm file contents appear in the response",
+        ],
+        "tools": ["curl", "Burp Suite"],
+        "remediation": "Disable DTD processing and external entity "
+                        "resolution in the XML parser configuration.",
+    },
+    "oauth_redirect_bypass": {
+        "title": "OAuth/OIDC redirect_uri Not Validated",
+        "cause": "The authorization endpoint accepts a redirect_uri that "
+                  "isn't strictly matched against a pre-registered "
+                  "allow-list.",
+        "impact": "An attacker can redirect the authorization code/token "
+                   "to an attacker-controlled host, hijacking the "
+                   "victim's OAuth session.",
+        "validation": "Confirm the crafted link actually delivers the "
+                       "code/token to the attacker-controlled host in a "
+                       "browser.",
+        "reproduction": [
+            "Build an authorize URL with an attacker-controlled redirect_uri",
+            "Send the link to a victim (or self-test) and complete the flow",
+            "Confirm the code/token lands at the attacker host",
+        ],
+        "tools": ["Burp Suite"],
+        "remediation": "Strictly match redirect_uri against an exact, "
+                        "pre-registered allow-list - no substring/prefix "
+                        "matching.",
+    },
+    "sqli_union_confirmed": {
+        "title": "UNION-Based SQL Injection",
+        "cause": "User input is concatenated into a SQL query without "
+                  "parameterization, and the result set is reflected "
+                  "back in the response.",
+        "impact": "Allows reading arbitrary data from the database "
+                   "(credentials, session tokens, other users' data).",
+        "validation": "Confirm the extracted value (e.g. version()/"
+                       "database()) matches the actual database.",
+        "reproduction": [
+            "Determine column count via ORDER BY",
+            "Inject UNION SELECT with a marker in each column",
+            "Replace NULL columns with queries of interest",
+        ],
+        "tools": ["sqlmap", "Burp Suite"],
+        "remediation": "Use parameterized queries/prepared statements "
+                        "everywhere; never concatenate user input into SQL.",
+    },
+    "sqli_shell_dropped": {
+        "title": "SQL Injection to Webshell (INTO OUTFILE)",
+        "cause": "The database user has FILE privilege and the web root "
+                  "is writable/guessable, allowing INTO OUTFILE to write "
+                  "a PHP file directly into it.",
+        "impact": "Direct unauthenticated remote code execution.",
+        "validation": "Confirm the dropped shell executes commands.",
+        "reproduction": [
+            "Confirm UNION-based injection and FILE privilege",
+            "UNION SELECT '<?php system($_GET[c]);?>' INTO OUTFILE '<web_root>/shell.php'",
+            "Request the dropped file with ?c=id",
+        ],
+        "tools": ["sqlmap"],
+        "remediation": "Revoke FILE privilege from web-application DB "
+                        "accounts; use parameterized queries.",
+    },
+    "upload_rce": {
+        "title": "File Upload Filter Bypass to RCE",
+        "cause": "The upload handler validates file type by client-"
+                  "supplied extension/MIME type rather than server-side "
+                  "content inspection, and the upload directory executes "
+                  "scripts.",
+        "impact": "Direct unauthenticated remote code execution via the "
+                   "uploaded webshell.",
+        "validation": "Confirm command output is returned when invoking "
+                       "the uploaded file.",
+        "reproduction": [
+            "Upload a PHP payload with a bypass extension (.phtml, "
+            "double extension, null byte, etc.)",
+            "Locate the uploaded file (common upload directories)",
+            "Request it with a command parameter and confirm execution",
+        ],
+        "tools": ["Burp Suite", "curl"],
+        "remediation": "Validate file content server-side (magic bytes), "
+                        "store uploads outside the web root or with "
+                        "execution disabled, and use a random filename.",
+    },
+    "deserialize_rce": {
+        "title": "Insecure Deserialization Remote Code Execution",
+        "cause": "The application deserializes attacker-controllable "
+                  "data (Java/PHP/Python serialized objects) without "
+                  "restricting which classes can be instantiated.",
+        "impact": "A crafted gadget chain can achieve remote code "
+                   "execution during deserialization.",
+        "validation": "Confirm with a time-delay or out-of-band callback "
+                       "payload rather than relying on a single timing "
+                       "sample.",
+        "reproduction": [
+            "Identify the serialization format (signature bytes/prefix)",
+            "Generate a gadget chain with ysoserial/phpggc for a "
+            "sleep/callback command",
+            "Submit it in the vulnerable parameter/cookie and observe the delay",
+        ],
+        "tools": ["ysoserial", "phpggc"],
+        "remediation": "Avoid deserializing untrusted data; if required, "
+                        "use a strict allow-list of deserializable "
+                        "classes/types.",
+    },
+    "session_id_leaked": {
+        "title": "Session Identifier Leaked in URL/Response",
+        "cause": "A session/auth token appears in a URL query string, "
+                  "error page, or redirect Location header.",
+        "impact": "Session identifiers leaked this way end up in logs, "
+                   "browser history, and Referer headers, and can be "
+                   "replayed by anyone who obtains them.",
+        "validation": "Confirm the harvested value is still a live, "
+                       "usable session.",
+        "reproduction": [
+            "Review logs/URLs/redirects for session-looking parameters",
+            "Replay the value as a cookie against an authenticated endpoint",
+        ],
+        "tools": ["Burp Suite"],
+        "remediation": "Never place session identifiers in URLs; use "
+                        "HttpOnly, Secure cookies and rotate the session "
+                        "ID on privilege change.",
+    },
+    "session_hijack_confirmed": {
+        "title": "Session Hijacking via Leaked Identifier",
+        "cause": "A leaked session identifier was accepted by the "
+                  "server as a valid, authenticated session.",
+        "impact": "Full impersonation of the affected user for as long "
+                   "as the session remains valid.",
+        "validation": "Already confirmed by this finding - response "
+                       "differed from an unauthenticated baseline when "
+                       "the harvested session was replayed.",
+        "reproduction": [
+            "Harvest a leaked session identifier",
+            "Replay it as a cookie against an authenticated endpoint",
+            "Confirm access to account-specific content",
+        ],
+        "tools": ["Burp Suite", "curl"],
+        "remediation": "Rotate session IDs on login, avoid leaking them "
+                        "in URLs/logs, and bind sessions to additional "
+                        "signals (IP/user-agent) where feasible.",
+    },
+    "mfa_bypass": {
+        "title": "2FA/MFA Bypass",
+        "cause": "The OTP/backup-code verification step is missing rate "
+                  "limiting, accepts a weak/guessable backup code, or "
+                  "trusts a client-settable 'remember this device' "
+                  "cookie.",
+        "impact": "Allows bypassing the second authentication factor "
+                   "entirely, reducing the account to single-factor "
+                   "(password-only) security.",
+        "validation": "Confirm the specific weakness (brute-forced code, "
+                       "accepted backup code, or forged cookie) actually "
+                       "grants access.",
+        "reproduction": [
+            "Identify the OTP/backup-code submission endpoint",
+            "Test for rate limiting with repeated wrong guesses",
+            "Test common/weak backup codes and any 'remember device' cookie",
+        ],
+        "tools": ["Burp Suite"],
+        "remediation": "Rate-limit and lock out OTP attempts, use "
+                        "high-entropy backup codes consumed on use, and "
+                        "cryptographically sign/verify remember-device "
+                        "cookies server-side.",
+    },
+    "cve_match": {
+        "title": "Known CVE in Fingerprinted Software Version",
+        "cause": "The server/software version disclosed via headers or "
+                  "application fingerprinting matches a publicly known "
+                  "CVE.",
+        "impact": "Varies by CVE - ranges from information disclosure to "
+                   "unauthenticated remote code execution; see the "
+                   "specific CVE/exploit note in the finding detail.",
+        "validation": "Confirm the exact version and that the target is "
+                       "not patched/backported before relying on this.",
+        "reproduction": [
+            "Confirm the exact software version",
+            "Look up the matched CVE/exploit-db entry",
+            "Run the referenced Metasploit module or PoC manually",
+        ],
+        "tools": ["searchsploit", "Metasploit"],
+        "remediation": "Patch/upgrade the affected software to a version "
+                        "without the CVE.",
+    },
+    "credential_reuse_confirmed": {
+        "title": "Credential Reuse Across Services",
+        "cause": "The same username/password works on multiple "
+                  "services (e.g. a web panel and SSH/FTP/SMB).",
+        "impact": "Compromise of one low-value service becomes a "
+                   "foothold on higher-value services sharing the same "
+                   "credentials.",
+        "validation": "Already confirmed - the credential pair "
+                       "successfully authenticated against the listed "
+                       "service.",
+        "reproduction": [
+            "Obtain a confirmed credential pair from any service",
+            "Retry it against every other discovered service in scope",
+        ],
+        "tools": ["hydra", "curl"],
+        "remediation": "Use unique credentials per service/account, and "
+                        "enforce this with a password manager or secrets "
+                        "vault.",
+    },
+    "ntlm_pth_success": {
+        "title": "Pass-the-Hash / Credential Authentication to SMB",
+        "cause": "Valid credentials (password or NTLM hash) authenticate "
+                  "successfully against SMB, allowing remote command "
+                  "execution.",
+        "impact": "Full remote code execution on the Windows host with "
+                   "the privileges of the authenticated account.",
+        "validation": "Already confirmed - a command was executed "
+                       "remotely via the authenticated SMB session.",
+        "reproduction": [
+            "Obtain valid credentials or an NTLM hash for a local/domain account",
+            "psexec.py/wmiexec.py <user>@<target> (or -hashes <LM:NTLM>)",
+        ],
+        "tools": ["impacket"],
+        "remediation": "Disable NTLM where possible, enforce unique "
+                        "local admin passwords (LAPS), and restrict "
+                        "SMB/WMI access to the accounts that need it.",
+    },
 }
 
 

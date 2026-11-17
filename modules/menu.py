@@ -33,6 +33,7 @@ MENU_TEXT = """{bold}{cyan}  MAIN MENU{reset}
   {green}[8]{reset} Authentication & Credential Testing
   {green}[9]{reset} XSS Exploitation Module
   {green}[10]{reset} Pentesting Assistant (Natural Language)
+  {green}[11]{reset} User Agreement / Disclaimer
   {yellow}[0]{reset} Clear Terminal
   {yellow}[99]{reset} Exit
 
@@ -52,6 +53,29 @@ AUTH_MENU_TEXT = """{bold}{cyan}  AUTHENTICATION & CREDENTIAL TESTING{reset}
   {green}[8]{reset} Token Analyzer (JWT / NTLM / OAuth / SAML)
   {green}[9]{reset} Authentication Log Analyzer
   {yellow}[0]{reset} Back to Main Menu
+
+  ============================
+"""
+
+USER_AGREEMENT_TEXT = """{bold}{cyan}  USER AGREEMENT / DISCLAIMER{reset}
+  ============================
+
+  This tool is provided for authorized security testing, CTF challenges
+  (e.g. TryHackMe), and educational use only.
+
+  Hello-Cat and @.Trunith are not responsible for any misuse of this
+  tool. By using it you agree that:
+
+    - You will only run scans, brute-force attempts, exploitation
+      modules, or any other feature of this tool against systems you
+      own or are explicitly authorized to test.
+    - You assume full responsibility for how you use this tool and
+      for any consequences of that use, including legal consequences.
+    - Hello-Cat / @.Trunith accept no liability for damage, data loss,
+      legal action, or any other outcome resulting from use or misuse
+      of this tool.
+    - Running this tool against systems you do not have permission to
+      test is illegal in most jurisdictions.
 
   ============================
 """
@@ -294,8 +318,9 @@ def run_pentest_assistant(state):
     state.target = target
 
     print(f"\n  Target: {target}")
-    print("  Tell me what you want done, e.g. \"Can you assess this website for me?\" "
-          "or \"Could you breach this website for me?\"")
+    print("  Tell me what you want done, e.g. \"Can you assess this website for me?\", "
+          "\"Could you breach this website for me?\", or \"Could you bypass this login "
+          "page/give me the credentials?\"")
     try:
         request_text = input("  Request: ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -307,7 +332,11 @@ def run_pentest_assistant(state):
 
     intent = pentest_assistant.classify_intent(request_text)
 
-    if intent == "breach":
+    if intent == "login_bypass":
+        print(f"\n[*] Understood as a LOGIN BYPASS request - running recon, then attempting "
+              f"to bypass the login page and retrieve/forge valid credentials for {target}.")
+        report, footholds = pentest_assistant.run_login_bypass(target, state, confirm_authorized)
+    elif intent == "breach":
         print(f"\n[*] Understood as a BREACH request - running recon, then attempting to "
               f"gain access to {target}.")
         report, footholds = pentest_assistant.run_breach(target, state, confirm_authorized)
@@ -715,6 +744,11 @@ def change_target(state):
     pause()
 
 
+def show_user_agreement(state):
+    print(USER_AGREEMENT_TEXT.format(bold=_BOLD, cyan=_CYAN, green=_GREEN, yellow=_YELLOW, reset=_RESET))
+    pause()
+
+
 HANDLERS = {
     "1": run_full_scan,
     "2": run_deep_vuln_analysis,
@@ -726,6 +760,7 @@ HANDLERS = {
     "8": run_auth_menu,
     "9": run_xss_module,
     "10": run_pentest_assistant,
+    "11": show_user_agreement,
 }
 
 
